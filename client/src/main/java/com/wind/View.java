@@ -1,5 +1,7 @@
 package com.wind;
 
+import java.util.Arrays;
+
 import com.wind.entities.WeatherData;
 
 
@@ -58,6 +60,36 @@ public class View {
         for (WeatherData weatherData : allWeatherData) {
             System.out.println(weatherData + "\n");
         }
+
+        double avgTemperature = Arrays.stream(allWeatherData)
+                                .mapToDouble(WeatherData::getTemperature)
+                                .average()
+                                .orElse(0.0);
+
+        double avgHumidity = Arrays.stream(allWeatherData)
+                                   .mapToDouble(WeatherData::getHumidity)
+                                   .average()
+                                   .orElse(0.0);
+
+        double avgPressure = Arrays.stream(allWeatherData)
+                                   .mapToDouble(WeatherData::getPressure)
+                                   .average()
+                                   .orElse(0.0);
+
+        double avgRadiation = Arrays.stream(allWeatherData)
+                                    .mapToDouble(WeatherData::getRadiation)
+                                    .average()
+                                    .orElse(0.0);
+        
+        // Consolidate and display the averages
+        System.out.println(Color.YELLOW + "===================================" + Color.RESET);
+        System.out.println(Color.YELLOW + "      MÉDIAS GERAIS DOS DADOS      " + Color.RESET);
+        System.out.println(Color.YELLOW + "===================================" + Color.RESET);
+        System.out.println(String.format("Temperatura Média: %.2f K", avgTemperature));
+        System.out.println(String.format("Umidade Média    : %.2f %%", avgHumidity));
+        System.out.println(String.format("Pressão Média     : %.2f hPa", avgPressure));
+        System.out.println(String.format("Radiação Média   : %.2f W/m²", avgRadiation));
+        System.out.println(Color.YELLOW + "===================================" + Color.RESET);
     }
 
 
@@ -85,6 +117,36 @@ public class View {
         for (WeatherData weatherData : mcWeatherData) {
             System.out.println(weatherData + "\n");
         }
+
+        double avgTemperature = Arrays.stream(mcWeatherData)
+                                .mapToDouble(WeatherData::getTemperature)
+                                .average()
+                                .orElse(0.0);
+
+        double avgHumidity = Arrays.stream(mcWeatherData)
+                                   .mapToDouble(WeatherData::getHumidity)
+                                   .average()
+                                   .orElse(0.0);
+
+        double avgPressure = Arrays.stream(mcWeatherData)
+                                   .mapToDouble(WeatherData::getPressure)
+                                   .average()
+                                   .orElse(0.0);
+
+        double avgRadiation = Arrays.stream(mcWeatherData)
+                                    .mapToDouble(WeatherData::getRadiation)
+                                    .average()
+                                    .orElse(0.0);
+        
+        // Exibe os resultados formatados
+        System.out.println(Color.YELLOW + "===================================" + Color.RESET);
+        System.out.println(Color.YELLOW + "      MÉDIAS GERAIS DOS DADOS      " + Color.RESET);
+        System.out.println(Color.YELLOW + "===================================" + Color.RESET);
+        System.out.println(String.format("Temperatura Média: %.2f K", avgTemperature));
+        System.out.println(String.format("Umidade Média    : %.2f %%", avgHumidity));
+        System.out.println(String.format("Pressão Média     : %.2f hPa", avgPressure));
+        System.out.println(String.format("Radiação Média   : %.2f W/m²", avgRadiation));
+        System.out.println(Color.YELLOW + "===================================" + Color.RESET);
     }
 
     public static void clearScreen() {
