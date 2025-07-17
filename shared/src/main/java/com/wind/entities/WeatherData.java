@@ -82,6 +82,7 @@ public class WeatherData implements Serializable{
         String horaFormatada = String.format("%tF %tT", time, time);
         return "ID: " + id + "\n" +
                "Microcontroller: " + microcontroller.getId() + "\n" +
+               "Region: " + microcontroller.getRegion() + "\n" +
                "Time: " + horaFormatada + "\n" +
                "Pressure: " + pressure + "\n" +
                "Radiation: " + radiation + "\n" +

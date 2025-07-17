@@ -20,14 +20,14 @@ public class HeartbeatResponder {
         try {
             serverSocket = new ServerSocket(heartbeatPort);
             System.out.println("[HeartbeatResponder] Listening for heartbeats on port " + heartbeatPort);
+            
             while (running) {
                 Socket lsSocket = serverSocket.accept();
+
                 try (ObjectInputStream ois = new ObjectInputStream(lsSocket.getInputStream())) {
                     Object receivedObject = ois.readObject();
-                    if (receivedObject instanceof List) {
-                        System.out.println("[HeartbeatResponder] Received proxy list from LocationServer during heartbeat.");
-                        // List<ProxyEntity> proxyList = (List<ProxyEntity>) receivedObject;
-                    } else {
+
+                    if (!(receivedObject instanceof List)) {
                         System.out.println("[HeartbeatResponder] Received an unexpected object during heartbeat.");
                     }
                 } catch (IOException | ClassNotFoundException e) {

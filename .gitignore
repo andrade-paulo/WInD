@@ -1,2 +1,6 @@
 */target/
 .vscode/
+wind-mc-*/
+*.csv
+*.dat
+*.txt

@@ -36,7 +36,7 @@ public class Message implements java.io.Serializable {
 
 
     public Message(WeatherData weather, String instrucao) {
-        this.content = weather.getId() + "|" + weather.getMicrocontroller().getId() + "|" + weather.getMicrocontroller().getLocation() + "|" + weather.getTime() + "|" +
+        this.content = weather.getId() + "|" + weather.getMicrocontroller().getId() + "|" + weather.getMicrocontroller().getRegion() + "|" + weather.getTime() + "|" +
                 weather.getPressure() + "|" + weather.getRadiation() + "|" + weather.getTemperature() + "|" + weather.getHumidity() + "|" + instrucao;
         this.arvore = new ArvoreHuffman();
 
@@ -76,32 +76,32 @@ public class Message implements java.io.Serializable {
         this.content = "";
         for (WeatherData weather : weathers) {
             if (weather != null) {
-                this.content += weather.getId() + "|" + weather.getMicrocontroller().getId() + "|" +
+                this.content += weather.getId() + "|" + weather.getMicrocontroller().getId() + "|" + weather.getMicrocontroller().getRegion() + "|" +
                         weather.getTime() + "|" + weather.getPressure() + "|" + weather.getRadiation() + "|" +
                         weather.getTemperature() + "|" + weather.getHumidity() + "|";
             }
         }
 
         this.content += instrucao;
-        this.arvore = new ArvoreHuffman();
+        //this.arvore = new ArvoreHuffman();
 
         // Cria a árvore de Huffman
-        char[] caracteres = new char[content.length()];
-        int[] frequencias = new int[content.length()];
+        //char[] caracteres = new char[content.length()];
+        //int[] frequencias = new int[content.length()];
 
-        arvore.contarCaractereFrequencia(content, caracteres, frequencias);
-        arvore.construirArvore(caracteres, frequencias);
-        arvore.imprimirCodigos();
+        //arvore.contarCaractereFrequencia(content, caracteres, frequencias);
+        //arvore.construirArvore(caracteres, frequencias);
+        //arvore.imprimirCodigos();
 
         // Comprime a mensagem
-        this.content = arvore.comprimir(content);
-        this.isCompressed = true;
+        //this.content = arvore.comprimir(content);
+        this.isCompressed = false;
     }
 
 
     // Construtor para MicrocontrollerEntity
     public Message(MicrocontrollerEntity microcontroller, String instrucao) {
-        this.content = microcontroller.getId() + "|" + microcontroller.getLocation() + "|" + instrucao;
+        this.content = microcontroller.getId() + "|" + microcontroller.getRegion() + "|" + instrucao;
 
         this.arvore = new ArvoreHuffman();
 
@@ -175,7 +175,7 @@ public class Message implements java.io.Serializable {
         // splited array
         String[] splited = this.content.split("[|]");
 
-        WeatherData[] weathers = new WeatherData[splited.length / 6];
+        WeatherData[] weathers = new WeatherData[splited.length / 8];
         int j = 0;
         
         if (weathers.length == 0) return weathers;

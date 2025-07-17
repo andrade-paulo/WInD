@@ -1,34 +1,35 @@
+// ProxyServer.java - Refatorado para Sockets TCP com Clientes
 package com.wind;
 
 import com.wind.CO.ApplicationServerHandler;
-import com.wind.CO.ClientMulticastEmitter;
-import com.wind.CO.StationConnectionHandler;
+import com.wind.CO.ClientHandler;
 import com.wind.interfaces.ProxyHandlerInterface;
-import com.wind.model.DAO.WeatherDataDAO;
 
+import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
-import java.net.InetAddress;
-import java.io.IOException;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 
 public class ProxyServer {
-    private static final int PROXY_STATION_PORT = 12345;
-
+    private static final int PROXY_CLIENT_PORT = 12345;
+    
+    // ApplicationServer
     private static final String MAIN_SERVER_HOST = "localhost";
     private static final int MAIN_SERVER_PORT = 54321;
-
-    private static final String MULTICAST_ADDRESS = "230.0.0.1";
-    private static final int MULTICAST_PORT = 19000;
-
+    
     private static final String LOCATION_SERVER_RMI_HOST = "localhost";
     private static final int LOCATION_SERVER_RMI_PORT = 1099;
     private static final String LOCATION_SERVER_RMI_NAME = "ProxyHandler";
-
     private static final int PROXY_HEARTBEAT_PORT = 12346;
-    // A rmiReplicaPort pode ser 0 se não for usada ativamente pelo proxy
     private static final int PROXY_RMI_REPLICA_PORT = 0;
-
+    
+    private static final List<ClientHandler> connectedClients = new CopyOnWriteArrayList<>();
+    public static ApplicationServerHandler applicationServerCommunicator = null;
 
     public static void main(String[] args) {
         System.out.println("\r\n" + //
@@ -46,14 +47,10 @@ public class ProxyServer {
                     "                      |__/                                 \r\n" + //
                     "                                                           \r\n" + //
                     "===========================================================\r\n");
-
-
-        ClientMulticastEmitter multicastEmitter = null;
-        ApplicationServerHandler applicationServerCommunicator = null;
-        StationConnectionHandler stationConnectionHandler = null;
-
+        
         HeartbeatResponder heartbeatResponder = null;
         ProxyHandlerInterface locationService = null;
+        ServerSocket clientServerSocket = null;
 
         final CountDownLatch latch = new CountDownLatch(1);
 
@@ -66,8 +63,8 @@ public class ProxyServer {
         }
         final String finalProxyHostAddress = proxyHostAddress;
 
-
         try {
+            // Lógica de Heartbeat e RMI com LocationServer
             heartbeatResponder = new HeartbeatResponder(PROXY_HEARTBEAT_PORT);
             new Thread(heartbeatResponder::startListening, "HeartbeatResponderThread").start();
             System.out.println("[ProxyServer] Heartbeat responder started on port " + PROXY_HEARTBEAT_PORT);
@@ -75,79 +72,82 @@ public class ProxyServer {
             try {
                 Registry registry = LocateRegistry.getRegistry(LOCATION_SERVER_RMI_HOST, LOCATION_SERVER_RMI_PORT);
                 locationService = (ProxyHandlerInterface) registry.lookup(LOCATION_SERVER_RMI_NAME);
-                locationService.registerProxy(finalProxyHostAddress, PROXY_STATION_PORT, PROXY_HEARTBEAT_PORT, PROXY_RMI_REPLICA_PORT, MULTICAST_ADDRESS, MULTICAST_PORT); //
+
+                // Informa a porta onde os clientes devem se conectar
+                locationService.registerProxy(finalProxyHostAddress, PROXY_CLIENT_PORT, PROXY_HEARTBEAT_PORT, PROXY_RMI_REPLICA_PORT, "N/A", 0);
                 System.out.println("[ProxyServer] Successfully registered with LocationServer at " +
-                                   LOCATION_SERVER_RMI_HOST + ":" + LOCATION_SERVER_RMI_PORT +
-                                   " as " + finalProxyHostAddress + ":" + PROXY_STATION_PORT +
-                                   " (HB Port: " + PROXY_HEARTBEAT_PORT + ")");
+                                   LOCATION_SERVER_RMI_HOST + ":" + LOCATION_SERVER_RMI_PORT);
             } catch (Exception e) {
                 System.err.println("[ProxyServer] Error connecting to or registering with LocationServer RMI: " + e.getMessage());
-                // Obs.: O proxy continua funcionando mesmo sem o LocationServer, mas não será descoberto.
             }
-
-            multicastEmitter = new ClientMulticastEmitter(MULTICAST_ADDRESS, MULTICAST_PORT);
-            final ClientMulticastEmitter finalMulticastEmitter = multicastEmitter;
-
+            
+            // O callback agora chama o método para broadcast via TCP
             applicationServerCommunicator = new ApplicationServerHandler(
                     MAIN_SERVER_HOST,
-                    MAIN_SERVER_PORT,
-                    finalMulticastEmitter::multicastData
+                    MAIN_SERVER_PORT
             );
+
             applicationServerCommunicator.connect();
 
-            WeatherDataDAO weatherDataDAO = new WeatherDataDAO(applicationServerCommunicator);
-            stationConnectionHandler = new StationConnectionHandler(PROXY_STATION_PORT, weatherDataDAO);
+            // Inicialização do servidor de clientes
+            clientServerSocket = new ServerSocket(PROXY_CLIENT_PORT);
+            System.out.println("[ProxyServer] Listening for clients on port " + PROXY_CLIENT_PORT);
 
-            Thread stationListenerThread = new Thread(stationConnectionHandler::startListening, "StationListenerThread");
-            stationListenerThread.start();
+            ServerSocket finalClientServerSocket = clientServerSocket;
 
-            System.out.println("[ProxyServer] Weather data components initialized. Proxy is running.");
+            Thread clientListenerThread = new Thread(() -> {
+                while (!finalClientServerSocket.isClosed()) {
+                    try {
+                        Socket clientSocket = finalClientServerSocket.accept();
+                        System.out.println("[ProxyServer] New client connected: " + clientSocket.getRemoteSocketAddress());
+
+                        // ClientHandler gerencia a conexão do cliente
+                        ClientHandler handler = new ClientHandler(clientSocket);
+                        connectedClients.add(handler);
+                        new Thread(handler).start();
+                    } catch (IOException e) {
+                        if (finalClientServerSocket.isClosed()) {
+                            System.out.println("[ProxyServer] Client listener socket closed.");
+                        } else {
+                            System.err.println("[ProxyServer] Error accepting client connection: " + e.getMessage());
+                        }
+                    }
+                }
+            }, "ClientListenerThread");
+            clientListenerThread.start();
+            
+            System.out.println("[ProxyServer] All components initialized. Proxy is running.");
             System.out.println("Ctrl+C to stop.");
-
-
-            final StationConnectionHandler finalStationHandler = stationConnectionHandler;
+            
+            // Lógica de Shutdown
             final ApplicationServerHandler finalMainComm = applicationServerCommunicator;
             final HeartbeatResponder finalHeartbeatResponder = heartbeatResponder;
-            final ProxyHandlerInterface finalLocationService = locationService; // Para desregistro
+            final ServerSocket finalClientSocketForShutdown = clientServerSocket;
 
             Runtime.getRuntime().addShutdownHook(new Thread(() -> {
                 System.out.println("[ProxyServer] Shutdown initiated...");
+                // Desconecta do RMI
+                if (finalHeartbeatResponder != null) finalHeartbeatResponder.stopListening();
+                if (finalMainComm != null) finalMainComm.disconnect();
+                try {
+                    if (finalClientSocketForShutdown != null) finalClientSocketForShutdown.close();
+                } catch (IOException e) { /*...*/ }
 
-                if (finalLocationService != null) {
-                    try {
-                        // TODO: Implementar um método unregisterProxy() na ProxyHandlerInterface 
-                        // finalLocationService.unregisterProxy(finalProxyHostAddress, PROXY_STATION_PORT, PROXY_HEARTBEAT_PORT, PROXY_RMI_REPLICA_PORT);
-                        // System.out.println("[ProxyServer] Unregistered from LocationServer.");
-                        System.out.println("[ProxyServer] Unregister functionality not explicitly called (method missing in interface). LocationServer relies on heartbeat.");
-                    } catch (Exception e) {
-                        System.err.println("[ProxyServer] Error unregistering from LocationServer: " + e.getMessage());
-                    }
+                // Fecha a conexão com todos os clientes
+                for(ClientHandler handler : connectedClients) {
+                    handler.closeConnection();
+                    connectedClients.remove(handler);
                 }
 
-                if (finalHeartbeatResponder != null) finalHeartbeatResponder.stopListening();
-                if (finalStationHandler != null) finalStationHandler.stopListening();
-                if (finalMainComm != null) finalMainComm.disconnect();
-                if (finalMulticastEmitter != null) finalMulticastEmitter.close();
                 System.out.println("[ProxyServer] All components shut down.");
                 latch.countDown();
             }, "ShutdownHookThread"));
 
             latch.await();
 
-        } catch (IOException e) { // IOException do multicastEmitter ou mainServerComm.connect
-            System.err.println("[ProxyServer] Failed to start proxy components: " + e.getMessage());
+        } catch (IOException | InterruptedException e) {
+            System.err.println("[ProxyServer] Critical error in main thread: " + e.getMessage());
             e.printStackTrace();
-        } catch (InterruptedException e) {
-            System.err.println("[ProxyServer] Main thread interrupted.");
-            Thread.currentThread().interrupt();
-        } finally {
-            System.out.println("[ProxyServer] Main method finally block executing.");
-             if (latch.getCount() > 0) {
-                if (heartbeatResponder != null) heartbeatResponder.stopListening();
-                if (stationConnectionHandler != null) stationConnectionHandler.stopListening();
-                if (applicationServerCommunicator != null) applicationServerCommunicator.disconnect();
-                if (multicastEmitter != null) multicastEmitter.close();
-            }
-        }
+        } 
     }
 }

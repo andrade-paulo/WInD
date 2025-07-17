@@ -4,26 +4,26 @@ import java.io.Serializable;
 
 public class MicrocontrollerEntity implements Serializable {
     private int id;
-    private String location;
+    private String region;
 
     public MicrocontrollerEntity(int id, String location) {
         this.id = id;
-        this.location = location;
+        this.region = location;
     }
 
     public int getId() {
         return id;
     }
 
-    public String getLocation() {
-        return location;
+    public String getRegion() {
+        return region;
     }
 
     public String toString() {
-        return "ID: " + id + "\nLocation: " + location;
+        return "ID: " + id + "\nLocation: " + region;
     }
 
-    public boolean equals(MicrocontrollerEntity cliente) {
-        return this.location.equals(cliente.getLocation());
+    public boolean equals(MicrocontrollerEntity microcontroller) {
+        return this.region.equals(microcontroller.getRegion()) && this.id == microcontroller.getId();
     }
 }

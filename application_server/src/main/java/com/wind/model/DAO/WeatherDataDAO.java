@@ -34,7 +34,7 @@ public class WeatherDataDAO {
     }
 
 
-    public WeatherData[] listarOS(MicrocontrollerEntity microcontroller) {
+    public WeatherData[] selectByMicrocontroller(MicrocontrollerEntity microcontroller) {
         LogDAO.addLog("[DB SELECT] Selecionando informações climáticas do microcontrolador " + microcontroller.getId());
         return weatherDataHash.getWeatherByMicrocontroller(microcontroller);
     }
