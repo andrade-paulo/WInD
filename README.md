@@ -28,7 +28,7 @@ Technical requirements include:
 # Architecture Overview
 The architecture of WInD is designed to be modular and scalable. In the Image below, you can see the main components of the system and how they interact with each other.
 
--image-
+<img width="6935" height="4100" alt="WInD - Whiteboard" src="https://github.com/user-attachments/assets/cec9f839-c1a1-4849-920e-449f4dc14313" />
 
 ## Highlights
 - **Docker**: The brokers and the RabbitMQ server are containerized using Docker, allowing for easy deployment and management.
