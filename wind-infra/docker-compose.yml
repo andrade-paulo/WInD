@@ -1,0 +1,44 @@
+services:
+  wind-ingress-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: wind-ingress-broker
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - wind-ingress-data:/mosquitto/data
+      - wind-ingress-log:/mosquitto/log
+
+  wind-egress-broker:
+    image: eclipse-mosquitto:2.0
+    container_name: wind-egress-broker
+    restart: unless-stopped
+    ports:
+      - "1884:1883"
+      - "9002:9001"
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - wind-egress-data:/mosquitto/data
+      - wind-egress-log:/mosquitto/log
+
+  wind-internal-bus:
+    image: rabbitmq:3.12-management
+    container_name: wind-internal-bus
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - wind-rabbitmq-data:/var/lib/rabbitmq/
+    environment:
+      - RABBITMQ_DEFAULT_USER=winduser
+      - RABBITMQ_DEFAULT_PASS=windpass
+
+volumes:
+  wind-ingress-data:
+  wind-ingress-log:
+  wind-egress-data:
+  wind-egress-log:
+  wind-rabbitmq-data:
