@@ -36,20 +36,20 @@ services:
       - RABBITMQ_DEFAULT_USER=winduser
       - RABBITMQ_DEFAULT_PASS=windpass
   
-  servicediscovery:
+  service-discovery:
     build:
-      context: ./servicediscovery
-    container_name: servicediscovery
+      context: ../service_discovery
+    container_name: service-discovery
     ports:
       - "7000:7000" # Expõe a porta para debug, mas a comunicação interna será via rede Docker
     networks:
       - wind_network
     restart: on-failure
 
-  apigateway:
+  api-gateway:
     build:
-      context: ./apigateway
-    container_name: apigateway
+      context: ../api_gateway
+    container_name: api-gateway
     # Não precisa expor a porta para o host, pois o NGINX falará com ele internamente
     networks:
       - wind_network
@@ -57,10 +57,10 @@ services:
       - servicediscovery # Garante que o discovery suba antes do gateway
     restart: on-failure
 
-  applicationserver:
+  application-server:
     build:
-      context: ./applicationserver
-    container_name: applicationserver
+      context: ../application_server
+    container_name: application-server
     networks:
       - wind_network
     depends_on:
