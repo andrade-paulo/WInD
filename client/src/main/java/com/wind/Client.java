@@ -9,10 +9,6 @@ import java.io.IOException;
 import java.net.Socket;
 import java.util.Scanner;
 
-import com.wind.View;
-import com.wind.message.Message;
-import com.wind.Controller;
-
 public class Client {
     public static Scanner scanner = new Scanner(System.in);
 

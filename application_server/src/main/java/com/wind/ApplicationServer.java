@@ -1,20 +1,18 @@
 package com.wind;
 
+import io.javalin.Javalin;
+
 import java.io.*;
-import java.net.ServerSocket;
-import java.net.Socket;
 import java.nio.charset.StandardCharsets;
-import java.text.ParseException;
 import java.util.Date;
-import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeoutException;
 
 import com.wind.model.DAO.WeatherDataDAO;
-import com.wind.model.DAO.LogDAO;
 import com.wind.entities.MicrocontrollerEntity;
 import com.wind.entities.WeatherData;
-import com.wind.message.Message;
+import com.wind.model.DAO.LogDAO;
+import com.wind.service.ServiceInstancePayload;
+import com.wind.service.ServiceRegistrar;
 
 // RabbitMQ
 import com.rabbitmq.client.ConnectionFactory;
@@ -23,13 +21,11 @@ import com.rabbitmq.client.Channel;
 import com.rabbitmq.client.DeliverCallback;
 
 public class ApplicationServer {
-    private static int port = 54321;
+    private static final int HTTP_PORT = 8080; // Porta para a API REST
+    private static final String SERVICE_NAME_IN_DISCOVERY = "application-server";
 
-    // A camada de acesso a dados (DAO) é mantida
-    protected static WeatherDataDAO WeatherDataDAO = new WeatherDataDAO();
+    protected static WeatherDataDAO weatherDataDAO = new WeatherDataDAO();
     protected static LogDAO logDAO = new LogDAO();
-
-    private static final List<ApplicationHandler> activeHandlers = new CopyOnWriteArrayList<>();
 
     // Configuração do RabbitMQ
     private static final String RABBITMQ_HOST = "localhost";
@@ -38,29 +34,73 @@ public class ApplicationServer {
     private static final String RABBITMQ_EXCHANGE_NAME = "wind_events_exchange";
 
     public static void main(String[] args) {
-        System.out.println("");
+        // Inicia o consumidor RabbitMQ
+        new Thread(ApplicationServer::startRabbitMQConsumer).start();
 
-        if (args.length > 0) {
-            port = Integer.parseInt(args[0]);
-        }
+        // Inicia o servidor HTTP
+        Javalin app = Javalin.create().start(HTTP_PORT);
+        System.out.println("Application Server (HTTP) iniciado na porta " + HTTP_PORT);
+        registerService();
 
-        Thread rabbitMqThread = new Thread(ApplicationServer::startRabbitMQConsumer, "RabbitMQ-Consumer-Thread");
-        rabbitMqThread.setDaemon(true);
-        rabbitMqThread.start();
+        // Endpoint de Health Check
+        app.get("/health", ctx -> ctx.status(200).result("OK"));
 
-        try (ServerSocket serverSocket = new ServerSocket(port)) {
-            System.out.println("\nApplication server running on port: " + port);
-
-            while (true) {
-                Socket socket = serverSocket.accept();
-                ApplicationHandler handler = new ApplicationHandler(socket);
-                new Thread(handler).start();
+        // Endpoint para SELECT ALL (GET /app/weather)
+        app.get("/app/weather", ctx -> {
+            WeatherData[] allWeatherData = weatherDataDAO.selectAll();
+            if (allWeatherData == null || allWeatherData.length == 0) {
+                ctx.status(200).json(new WeatherData[0]); // Retorna array vazio
+            } else {
+                ctx.status(200).json(allWeatherData);
             }
+        });
 
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        // Endpoint para SELECT BY MICROCONTROLLER
+        app.get("/app/weather/microcontroller/{id}", ctx -> {
+            try {
+                int mcId = Integer.parseInt(ctx.pathParam("id"));
+                String region = ctx.queryParam("region");
+
+                if (region == null || region.isBlank()) {
+                    ctx.status(400).result("O parâmetro 'region' é obrigatório.");
+                    return; 
+                }
+
+                MicrocontrollerEntity mcEntity = new MicrocontrollerEntity(mcId, region);
+
+                WeatherData[] weatherDataList = weatherDataDAO.selectByMicrocontroller(mcEntity);
+                
+                if (weatherDataList == null || weatherDataList.length == 0) {
+                    ctx.status(200).json(new WeatherData[0]); // Retorna array vazio
+                } else {
+                    ctx.status(200).json(weatherDataList);
+                }
+            } catch (NumberFormatException e) {
+                ctx.status(400).result("ID do microcontrolador inválido.");
+            } catch (Exception e) {
+                ctx.status(500).result("Erro interno ao processar a requisição.");
+                e.printStackTrace();
+            }
+        });
     }
+
+    private static void registerService() {
+        // "applicationserver" é o nome no Docker Compose.
+        String serviceAddress = SERVICE_NAME_IN_DISCOVERY + ":" + HTTP_PORT;
+        
+        ServiceInstancePayload payload = new ServiceInstancePayload(
+            SERVICE_NAME_IN_DISCOVERY,
+            SERVICE_NAME_IN_DISCOVERY + "-" + java.util.UUID.randomUUID().toString(),
+            serviceAddress,
+            "http://" + serviceAddress + "/health"
+        );
+        
+        ServiceRegistrar registrar = new ServiceRegistrar();
+        // Atraso para garantir que o service discovery esteja pronto no ambiente Docker
+        try { Thread.sleep(10000); } catch (InterruptedException e) { e.printStackTrace(); }
+        registrar.register(payload);
+    }
+
 
     private static void startRabbitMQConsumer() {
         try {
@@ -115,96 +155,7 @@ public class ApplicationServer {
         WeatherData newData = new WeatherData(microcontroller, pressure, radiation, temperature, humidity);
         
         // Usa o DAO existente para adicionar os dados
-        WeatherDataDAO.addWeatherData(newData);
+        weatherDataDAO.addWeatherData(newData);
         LogDAO.addLog("[DATA_INSERT] New data from RabbitMQ persisted for station ID: " + stationId);
-    }
-
-
-    // Connection handler for the proxy connections
-    private static class ApplicationHandler implements Runnable {
-        private Socket socket;
-        private boolean conexao = true;
-        @SuppressWarnings("unused")  // Por algum motivo tá acusando unused
-        private ObjectOutputStream objectOutputStream;
-        private String socketAddress;
-
-        public ApplicationHandler(Socket socket) {
-            this.socket = socket;
-            this.socketAddress = socket.getInetAddress().getHostAddress() + ":" + socket.getPort();
-            System.out.println("\n-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-");
-            System.out.println("Hello, " + this.socketAddress);
-            System.out.println("-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-");
-            LogDAO.addLog("[CONNECTION] Conexão estabelecida com " + this.socketAddress);
-        }
-
-        @Override
-        public void run() {
-            try (ObjectInputStream in = new ObjectInputStream(socket.getInputStream());
-                 ObjectOutputStream out = new ObjectOutputStream(socket.getOutputStream())) {
-
-                this.objectOutputStream = out;
-                activeHandlers.add(this);
-
-                while (conexao) {
-                    Message message = (Message) in.readObject();
-                    String instruction = message.getInstrucao();
-                    LogDAO.addLog("[MESSAGE] " + this.socketAddress + " requisitou " + instruction);
-
-                    try {
-                        switch (instruction) {
-                            case "SELECTALL":
-                                handleSelectAll(out);
-                                break;
-                            case "SELECTBYMC":
-                                handleSelectByMicrocontroller(message, out);
-                                break;
-                            default:
-                                System.out.println("Unknown instruction : " + instruction + " from " + this.socketAddress);
-                                LogDAO.addLog("[WARNING] Unknown instruction: " + instruction + " from " + this.socketAddress);
-                                break;
-                        }
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-            } catch (EOFException e) {
-                // ...
-            } catch (IOException | ClassNotFoundException e) {
-                // ...
-            } finally {
-                activeHandlers.remove(this);
-            }
-        }
-
-        private void handleSelectAll(ObjectOutputStream out) throws IOException {
-            WeatherData[] allWeatherData = WeatherDataDAO.selectAll();
-            Message reply;
-
-            if (allWeatherData == null || allWeatherData.length == 0) {
-                 reply = new Message(new WeatherData[0], "EMPTY_SELECT_ALL"); // Send empty array with specific status
-            } else {
-                // reply = new Message(allWeatherData, "REPLY"); // Original
-                reply = new Message(allWeatherData, "SUCCESS_SELECT_ALL");
-            }
-            
-            out.writeObject(reply);
-            out.flush();
-        }
-
-        private void handleSelectByMicrocontroller(Message message, ObjectOutputStream out) throws IOException, ParseException {
-            WeatherData[] weatherDataList = WeatherDataDAO.selectByMicrocontroller(message.getMicrocontrollerEntity());
-            Message reply;
-
-            if (weatherDataList == null || weatherDataList.length == 0) {
-                reply = new Message(new WeatherData[0], "EMPTY_SELECT_BY_MC"); // Send empty array
-            } else {
-                reply = new Message(weatherDataList, "SUCCESS_SELECT_BY_MC");
-            }
-
-            System.out.println(reply.getWeathers().length + " weather data found for microcontroller");
-
-            out.writeObject(reply);
-            out.flush();
-        }
     }
 }
