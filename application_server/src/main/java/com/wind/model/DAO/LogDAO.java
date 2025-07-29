@@ -6,7 +6,7 @@ import java.util.Date;
 public class LogDAO {
     static private String log;
     //private static final String ARQUIVO = "database/log.txt"; 
-    private static final String ARQUIVO = "application_server/src/main/java/com/wind/database/log.txt"; 
+    private static final String ARQUIVO = "/app/database/log.txt"; 
 
     public LogDAO() {
         loadLog();

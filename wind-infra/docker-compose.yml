@@ -8,8 +8,8 @@ services:
       - "9001:9001"
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - wind-ingress-data:/mosquitto/data
-      - wind-ingress-log:/mosquitto/log
+      - wind_ingress_data:/mosquitto/data
+      - wind_ingress_log:/mosquitto/log
 
   wind-egress-broker:
     image: eclipse-mosquitto:2.0
@@ -20,8 +20,8 @@ services:
       - "9002:9001"
     volumes:
       - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - wind-egress-data:/mosquitto/data
-      - wind-egress-log:/mosquitto/log
+      - wind_egress_data:/mosquitto/data
+      - wind_egress_log:/mosquitto/log
 
   wind-internal-bus:
     image: rabbitmq:3.12-management
@@ -30,42 +30,68 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    networks:
+      - wind_network
     volumes:
-      - wind-rabbitmq-data:/var/lib/rabbitmq/
+      - wind_rabbitmq_data:/var/lib/rabbitmq/
     environment:
       - RABBITMQ_DEFAULT_USER=winduser
       - RABBITMQ_DEFAULT_PASS=windpass
-  
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   service-discovery:
     build:
-      context: ../service_discovery
+      context: ../  # O contexto agora é a raiz do projeto
+      dockerfile: Dockerfile
+      target: service-discovery
     container_name: service-discovery
     ports:
-      - "7000:7000" # Expõe a porta para debug, mas a comunicação interna será via rede Docker
+      - "7000:7000"
     networks:
       - wind_network
     restart: on-failure
+    healthcheck:
+      # Comando que o Docker executará para verificar a saúde do serviço.
+      # Ele tenta acessar o endpoint /health. Se falhar, o serviço é considerado não saudável.
+      test: ["CMD", "curl", "-f", "http://localhost:7000/health"]
+      interval: 10s 
+      timeout: 5s
+      retries: 5
+      start_period: 10s # Dá um tempo inicial de 10s para o serviço iniciar antes de começar os checks.
 
   api-gateway:
     build:
-      context: ../api_gateway
+      context: ../
+      dockerfile: Dockerfile
+      target: api-gateway
     container_name: api-gateway
-    # Não precisa expor a porta para o host, pois o NGINX falará com ele internamente
     networks:
       - wind_network
-    depends_on:
-      - servicediscovery # Garante que o discovery suba antes do gateway
     restart: on-failure
+    depends_on:
+      # Espera o service-discovery ficar "saudável".
+      service-discovery:
+        condition: service_healthy
 
   application-server:
     build:
-      context: ../application_server
+      context: ../
+      dockerfile: Dockerfile
+      target: application-server
     container_name: application-server
     networks:
       - wind_network
+    volumes:
+      - ./database_backup:/app/database
     depends_on:
-      - rabbitmq
-      - servicediscovery
+      wind-internal-bus:
+        condition: service_healthy
+      service-discovery:
+        condition: service_healthy
     restart: on-failure
 
   nginx:
@@ -78,7 +104,7 @@ services:
     networks:
       - wind_network
     depends_on:
-      - apigateway
+      - api-gateway
     restart: unless-stopped
 
 networks:
@@ -86,8 +112,8 @@ networks:
     driver: bridge
 
 volumes:
-  wind-ingress-data:
-  wind-ingress-log:
-  wind-egress-data:
-  wind-egress-log:
-  wind-rabbitmq-data:
+  wind_ingress_data:
+  wind_ingress_log:
+  wind_egress_data:
+  wind_egress_log:
+  wind_rabbitmq_data:

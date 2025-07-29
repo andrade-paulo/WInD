@@ -10,9 +10,10 @@ import java.util.stream.Collectors;
 
 public class RegistryService {
 
-    // Usamos ConcurrentHashMap para garantir que o acesso ao mapa seja thread-safe.
-    // A chave do mapa externo é o nome do serviço (ex: "application-server").
+    // ConcurrentHashMap para garantir que o acesso ao mapa seja thread-safe.
+    // A chave do mapa externo é o nome do serviço.
     // O mapa interno guarda as instâncias por instanceId.
+
     private final Map<String, Map<String, ServiceInstance>> registry = new ConcurrentHashMap<>();
 
     public void register(ServiceInstance instance) {
@@ -21,6 +22,17 @@ public class RegistryService {
         registry.computeIfAbsent(instance.getServiceName(), k -> new ConcurrentHashMap<>())
                 .put(instance.getInstanceId(), instance);
         System.out.println("Instância registrada: " + instance.getInstanceId());
+    }
+
+    public boolean receiveHeartbeat(String serviceName, String instanceId) {
+        Map<String, ServiceInstance> instances = registry.get(serviceName);
+        if (instances != null && instances.containsKey(instanceId)) {
+            ServiceInstance instance = instances.get(instanceId);
+            instance.setLastHeartbeat(Instant.now());
+            System.out.println("Heartbeat recebido de: " + instanceId);
+            return true;
+        }
+        return false;
     }
 
     public void deregister(String serviceName, String instanceId) {
@@ -39,8 +51,7 @@ public class RegistryService {
         if (instances == null) {
             return List.of(); // Retorna lista vazia se o serviço não existe
         }
-        // Na nossa implementação de health check, vamos simplesmente remover instâncias inativas.
-        // Então, todas as instâncias no registro são consideradas saudáveis.
+        
         return instances.values().stream().collect(Collectors.toList());
     }
     

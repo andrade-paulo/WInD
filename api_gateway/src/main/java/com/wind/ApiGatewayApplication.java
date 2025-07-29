@@ -20,7 +20,7 @@ public class ApiGatewayApplication {
         DiscoveryService discoveryService = new DiscoveryService();
         ProxyService proxyService = new ProxyService();
 
-        Javalin app = Javalin.create().start(8000);
+        Javalin app = Javalin.create().start("0.0.0.0", 8000);
         System.out.println("API Gateway iniciado na porta 8000.");
 
         // Criamos uma única instância do nosso Handler para reutilizá-lo

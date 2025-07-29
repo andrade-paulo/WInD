@@ -22,14 +22,11 @@ public class ProxyService {
 
     public void proxy(Context ctx, String targetAddress) {
         try {
-            // CORREÇÃO: Usamos ctx.path() para obter o caminho completo da requisição original.
-            // A lógica de remoção do prefixo será mais simples no ApiGatewayApplication.
             String path = ctx.path();
             String queryString = ctx.queryString() == null ? "" : "?" + ctx.queryString();
             
             URI targetUri = new URI("http://" + targetAddress + path + queryString);
 
-            // CORREÇÃO: Usamos bodyAsBytes() que é mais direto e evita problemas de tipo.
             HttpRequest.BodyPublisher bodyPublisher = HttpRequest.BodyPublishers.ofByteArray(ctx.bodyAsBytes());
             
             HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(targetUri)

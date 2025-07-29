@@ -17,7 +17,7 @@ public class WeatherDataDAO {
     private int ocupacao;
 
     //private final String ARQUIVO = "database/database.dat";
-    private final String ARQUIVO = "application_server/src/main/java/com/wind/database/database.dat";
+    private final String ARQUIVO = "/app/database/database.dat";
     private final int TAMANHO_INICIAL = 100; 
     
     public WeatherDataDAO() {

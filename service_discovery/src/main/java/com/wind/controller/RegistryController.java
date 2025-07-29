@@ -16,7 +16,9 @@ public class RegistryController {
     }
 
     public void createRoutes(Javalin app) {
+        app.get("/health", ctx -> ctx.status(200).result("OK"));
         app.post("/register", this::register);
+        app.post("/heartbeat", this::heartbeat);
         app.post("/deregister", this::deregister);
         app.get("/services/{serviceName}", this::getServiceInstances);
         app.get("/registry/view", this::viewRegistry); // Endpoint para visualização
@@ -33,6 +35,17 @@ public class RegistryController {
         ServiceInstance instance = ctx.bodyAsClass(ServiceInstance.class);
         registryService.deregister(instance.getServiceName(), instance.getInstanceId());
         ctx.status(200).result("Serviço desregistrado.");
+    }
+
+    private void heartbeat(Context ctx) {
+        ServiceInstance instanceInfo = ctx.bodyAsClass(ServiceInstance.class);
+        boolean updated = registryService.receiveHeartbeat(instanceInfo.getServiceName(), instanceInfo.getInstanceId());
+        if (updated) {
+            ctx.status(200).result("Heartbeat recebido.");
+        } else {
+            // Retornar 404 para que o cliente saiba que precisa se registrar novamente.
+            ctx.status(404).result("Instância não encontrada. O serviço deve se registrar novamente.");
+        }
     }
 
     private void getServiceInstances(Context ctx) {
