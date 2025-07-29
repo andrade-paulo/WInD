@@ -15,6 +15,8 @@ public class WeatherData implements Serializable{
 
     private static final long serialVersionUID = 1L;
 
+    public WeatherData() {}
+
     public WeatherData(MicrocontrollerEntity microcontroller, float pressure, float radiation, float temperature, float humidity) {
         this.id = ++count;
         this.time = new Date();
@@ -38,45 +40,25 @@ public class WeatherData implements Serializable{
         this.humidity = humidity;
     }
 
-    public int getId() {
-        return id;
-    }
+    // Getters
+    public int getId() { return id; }
+    public float getPressure() { return pressure; }
+    public float getRadiation() { return radiation; }
+    public float getTemperature() { return temperature; }
+    public float getHumidity() { return humidity; }
+    public Date getTime() { return time; }
+    public MicrocontrollerEntity getMicrocontroller() { return microcontroller; }
+    public static int getCount() { return count; }
 
-    public void setId(int id) {
-        this.id = id;
-    }   
-
-    public float getPressure() {
-        return pressure;
-    }
-
-    public float getRadiation() {
-        return radiation;
-    }
-
-    public float getTemperature() {
-        return temperature;
-    }
-
-    public float getHumidity() {
-        return humidity;
-    }
-
-    public Date getTime() {
-        return time;
-    }
-
-    public MicrocontrollerEntity getMicrocontroller() {
-        return microcontroller;
-    }
-
-    public static void setCount(int count) {
-        WeatherData.count = count;
-    }
-
-    public static int getCount() {
-        return count;
-    }
+    // Setters
+    public void setId(int id) { this.id = id; }
+    public void setPressure(float pressure) { this.pressure = pressure; }
+    public void setRadiation(float radiation) { this.radiation = radiation; }
+    public void setTemperature(float temperature) { this.temperature = temperature; }
+    public void setHumidity(float humidity) { this.humidity = humidity; }
+    public void setTime(Date time) { this.time = time; }
+    public void setMicrocontroller(MicrocontrollerEntity microcontroller) { this.microcontroller = microcontroller; }
+    public static void setCount(int count) { WeatherData.count = count; }
 
     public String toString() {
         String horaFormatada = String.format("%tF %tT", time, time);

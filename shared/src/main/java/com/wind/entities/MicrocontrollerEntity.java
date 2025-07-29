@@ -6,6 +6,8 @@ public class MicrocontrollerEntity implements Serializable {
     private int id;
     private String region;
 
+    public MicrocontrollerEntity() {}
+
     public MicrocontrollerEntity(int id, String location) {
         this.id = id;
         this.region = location;
@@ -17,6 +19,14 @@ public class MicrocontrollerEntity implements Serializable {
 
     public String getRegion() {
         return region;
+    }
+
+    public void setId(int id) {
+        this.id = id;
+    }
+
+    public void setRegion(String region) {
+        this.region = region;
     }
 
     public String toString() {
