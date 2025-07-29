@@ -13,7 +13,7 @@ public class ProxyService {
     // Cabeçalhos que são específicos da conexão e não devem ser repassados
     private static final List<String> HOP_BY_HOP_HEADERS = List.of(
         "Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization",
-        "TE", "Trailers", "Transfer-Encoding", "Upgrade", "Host"
+        "TE", "Trailers", "Transfer-Encoding", "Upgrade", "Host", "Content-Length"
     );
 
     public ProxyService() {

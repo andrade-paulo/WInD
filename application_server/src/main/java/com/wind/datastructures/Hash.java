@@ -1,7 +1,9 @@
 package com.wind.datastructures;
 
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.List;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -274,20 +276,23 @@ public class Hash<T> implements Serializable, Iterable<T> {
     public WeatherData[] getWeatherByMicrocontroller(MicrocontrollerEntity microcontroller) {
         lock.lock();
         try {
-            WeatherData[] weatherData = new WeatherData[ocupacao];
+            // Usa uma lista para armazenar dinamicamente os resultados encontrados
+            List<WeatherData> weatherDataList = new ArrayList<>();
 
-            int j = 0;
             for (int i = 0; i < tamanho; i++) {
                 if (tabela[i] != null && tabela[i].valor instanceof WeatherData) {
                     WeatherData weather = (WeatherData) tabela[i].valor;
 
-                    if (weather.getMicrocontroller().equals(microcontroller)) {
-                        weatherData[j++] = weather;
+                    // Garante que o microcontrolador não é nulo antes de comparar
+                    if (weather.getMicrocontroller() != null && weather.getMicrocontroller().equals(microcontroller)) {
+                        weatherDataList.add(weather);
                     }
                 }
             }
 
-            return weatherData;
+            // Converte a lista para um array do tamanho exato dos elementos encontrados
+            return weatherDataList.toArray(new WeatherData[0]);
+            
         } finally {
             lock.unlock();
         }

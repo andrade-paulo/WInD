@@ -1,53 +1,83 @@
 package com.wind;
 
-import java.io.ObjectInputStream;
-import java.io.ObjectOutputStream;
-
-import com.wind.message.Message;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.wind.entities.WeatherData;
-import com.wind.entities.MicrocontrollerEntity;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
 
 public class Controller {
-    private static ObjectOutputStream out;
-    private static ObjectInputStream in;
-    
-    public Controller() {}
+    private static HttpClient httpClient;
+    private static ObjectMapper objectMapper;
+    private static String baseUrl;
+    private static String apiKey;
 
-    public static void setProxyServer(ObjectOutputStream proxyOut, ObjectInputStream proxyIn) {
-        Controller.out = proxyOut;
-        Controller.in = proxyIn;
+    // Bloco inicializador para configurar o cliente HTTP e o ObjectMapper
+    static {
+        httpClient = HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
+                .connectTimeout(Duration.ofSeconds(10))
+                .build();
+        objectMapper = new ObjectMapper();
+
+        // Configuração para ignorar propriedades desconhecidas ao desserializar
+        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
+    public static void init(String gatewayUrl, String key) {
+        Controller.baseUrl = gatewayUrl;
+        Controller.apiKey = key;
+    }
 
+    /**
+     * Busca dados climáticos de um microcontrolador específico.
+     * @param codigo O ID do microcontrolador.
+     * @param region A região do microcontrolador.
+     * @return Um array de WeatherData.
+     * @throws Exception Se ocorrer um erro na comunicação ou processamento.
+     */
     public static WeatherData[] getWeatherByMicrocontroller(int codigo, String region) throws Exception {
-        MicrocontrollerEntity microcontroller = new MicrocontrollerEntity(codigo, region);
-
-        Message request = new Message(microcontroller, "SELECTBYMC");
-        out.writeObject(request);
-        out.flush();
+        String uriString = String.format("%s/app/weather/microcontroller/%d?region=%s", baseUrl, codigo, region);
         
-        Message response = (Message) in.readObject();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(uriString))
+                .header("X-API-Key", apiKey)
+                .GET()
+                .build();
 
-        if (response.getInstrucao().equals("SUCCESS_SELECT_BY_MC") || response.getInstrucao().equals("EMPTY_SELECT_BY_MC")) {
-            System.out.println("Found " + response.getWeathers().length + " weather data for microcontroller " + codigo + " in region " + region);
-            return response.getWeathers();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() == 200) {
+            WeatherData[] weatherData = objectMapper.readValue(response.body(), WeatherData[].class);
+            System.out.println("\nEncontrados " + weatherData.length + " registros para o microcontrolador " + codigo + " na região " + region);
+            return weatherData;
         } else {
-            throw new Exception("Erro ao buscar dados climáticos: " + response.getInstrucao());
+            throw new Exception("Erro ao buscar dados: " + response.statusCode() + " - " + response.body());
         }
     }
 
-
+    /**
+     * Busca todos os dados climáticos disponíveis.
+     * @return Um array de WeatherData.
+     * @throws Exception Se ocorrer um erro na comunicação ou processamento.
+     */
     public static WeatherData[] getAllWeatherDatas() throws Exception {
-        Message request = new Message("SELECTALL");
-        out.writeObject(request);
-        out.flush();
-        
-        Message response = (Message) in.readObject();
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + "/app/weather"))
+                .header("X-API-Key", apiKey)
+                .GET()
+                .build();
 
-        if (response.getInstrucao().equals("SUCCESS_SELECT_ALL") || response.getInstrucao().equals("EMPTY_SELECT_ALL")) {
-            return response.getWeathers();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() == 200) {
+            return objectMapper.readValue(response.body(), WeatherData[].class);
         } else {
-            throw new Exception("Erro ao buscar dados climáticos: " + response.getInstrucao());
+            throw new Exception("Erro ao buscar dados: " + response.statusCode() + " - " + response.body());
         }
     }
 }
