@@ -1,3 +1,5 @@
+<img width="2500" height="587" alt="WInD Banner" src="https://github.com/user-attachments/assets/e0ed35ae-818c-495e-b938-cfa4910e56b5" />
+
 The **Weather Information Distributor** (WInD) is a distributed system made in Java to help handle weather data from various sources. This system was made as a assignment for the Distributed Programming course at UFERSA, Brazil. The project is designed to be modular and extensible, allowing for easy integration of new data sources and functionalities.
 
 
@@ -28,7 +30,7 @@ Technical requirements include:
 # Architecture Overview
 The architecture of WInD is designed to be modular and scalable. In the Image below, you can see the main components of the system and how they interact with each other.
 
-<img width="6935" height="4100" alt="WInD - Whiteboard" src="https://github.com/user-attachments/assets/cec9f839-c1a1-4849-920e-449f4dc14313" />
+![WInD - Whiteboard](https://github.com/user-attachments/assets/b053aba5-cf25-4a22-99e4-e993f323ddbd)
 
 ## Highlights
 - **Docker**: The brokers and the RabbitMQ server are containerized using Docker, allowing for easy deployment and management.
