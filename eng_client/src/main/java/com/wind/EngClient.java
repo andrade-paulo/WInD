@@ -2,21 +2,25 @@ package com.wind;
 
 import com.wind.model.LogCSV;
 
-import org.eclipse.paho.client.mqttv3.*;
-import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
-
+import java.io.IOException;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.util.Scanner;
-import java.util.UUID;
 
 public class EngClient {
-    private static final String EGRESS_BROKER_URL = "tcp://localhost:1884";
-    private static final String CLIENT_ID = "wind-client-viewer-" + UUID.randomUUID();
-    private static final String BASE_TOPIC = "formatted/realtime/";
+    private static final String API_KEY = "super-secret-key-123";
+    private static final String WEATHER_STATION_SERVICE_NAME = "weather-station";
 
-    private IMqttClient mqttClient;
-    private String currentTopic = null;
+    private DatagramSocket udpSocket;
+    private volatile boolean isRunning = true;
     private final Scanner scanner;
+    private final HttpClient httpClient;
+    private String gatewayUrl;
 
     private boolean[] regionsSelected = new boolean[4]; // North, South, East, West
 
@@ -24,10 +28,11 @@ public class EngClient {
 
     public EngClient() {
         this.scanner = new Scanner(System.in);
+        this.httpClient = HttpClient.newHttpClient();
     }
 
     public static void main(String[] args) {
-        System.out.println("WInD - Realtime Client Viewer");
+        System.out.println("WInD - Realtime Client Viewer (UDP Version)");
         System.out.println("===========================");
 
         EngClient client = new EngClient();
@@ -36,18 +41,106 @@ public class EngClient {
 
     public void start() {
         try {
-            System.out.println("[INIT] Connecting to Egress MQTT Broker (" + EGRESS_BROKER_URL + ")...");
-            connect();
-            System.out.println("Connection successful.");
+            System.out.print("Insira a URL do API Gateway (ex: http://localhost:80): ");
+            String inputUrl = scanner.nextLine().trim();
+            this.gatewayUrl = inputUrl.isEmpty() ? "http://localhost:80" : inputUrl;
+
+            if (!this.gatewayUrl.toLowerCase().startsWith("http://") && !this.gatewayUrl.toLowerCase().startsWith("https://")) {
+                this.gatewayUrl = "http://" + this.gatewayUrl;
+            }
+
+            System.out.println("[INIT] Requesting WeatherStation address from API Gateway...");
+            String address = getServiceAddress(WEATHER_STATION_SERVICE_NAME);
+            
+            if (address == null) {
+                System.err.println("Could not find WeatherStation service. Exiting.");
+                return;
+            }
+
+            System.out.println("[DISCOVERY] WeatherStation found at: " + address);
+            
+            // Parse port from address (assuming host:port)
+            String[] parts = address.split(":");
+            int port = Integer.parseInt(parts[1]);
+
+            System.out.println("[INIT] Starting UDP Listener on port " + port + "...");
+            startUdpListener(port);
 
             // Loop principal do menu
             mainMenuLoop();
 
-        } catch (MqttException e) {
-            System.err.println("Failed to connect to the broker: " + e.getMessage());
+        } catch (Exception e) {
+            System.err.println("Error: " + e.getMessage());
             e.printStackTrace();
         } finally {
             stop();
+        }
+    }
+
+    private String getServiceAddress(String serviceName) {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(gatewayUrl + "/discovery/" + serviceName))
+                    .header("X-API-Key", API_KEY)
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                return response.body();
+            } else {
+                System.err.println("API Gateway returned error: " + response.statusCode() + " - " + response.body());
+                return null;
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to contact API Gateway: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private void startUdpListener(int port) {
+        new Thread(() -> {
+            try {
+                udpSocket = new DatagramSocket(port);
+                byte[] buffer = new byte[1024];
+
+                while (isRunning) {
+                    DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
+                    try {
+                        udpSocket.receive(packet);
+                        String payload = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
+                        processMessage(payload);
+                    } catch (IOException e) {
+                        if (isRunning) {
+                            System.err.println("Error receiving UDP packet: " + e.getMessage());
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                System.err.println("Could not bind to UDP port " + port + ": " + e.getMessage());
+            }
+        }).start();
+    }
+
+    private void processMessage(String payload) {
+        // Payload format: ID|Location|Pressure|Radiation|Temp|Humidity
+        // Example: 1|North|1000.0|500.0|25.0|50.0
+        
+        String[] parts = payload.split("\\|");
+        if (parts.length < 2) return;
+
+        String location = parts[1];
+        boolean show = false;
+
+        if (location.equalsIgnoreCase("North") && regionsSelected[0]) show = true;
+        else if (location.equalsIgnoreCase("South") && regionsSelected[1]) show = true;
+        else if (location.equalsIgnoreCase("East") && regionsSelected[2]) show = true;
+        else if (location.equalsIgnoreCase("West") && regionsSelected[3]) show = true;
+
+        if (show) {
+            System.out.printf("[DADO RECEBIDO] Local: %s | Dados: %s%n", location, payload);
+            logCSV.log("udp/realtime/" + location, payload);
         }
     }
 
@@ -60,27 +153,28 @@ public class EngClient {
 
             switch (choice) {
                 case "1":
-                    subscribeToTopic(BASE_TOPIC + "#"); // Wildcard para tudo
                     regionsSelected = new boolean[]{true, true, true, true}; // Marca todas como selecionadas
+                    System.out.println("Visualizando TUDO.");
                     break;
                 case "2":
-                    subscribeToTopic(BASE_TOPIC + "North/#");
                     regionsSelected = new boolean[]{true, false, false, false}; // Marca Norte como selecionada
+                    System.out.println("Visualizando APENAS NORTE.");
                     break;
                 case "3":
-                    subscribeToTopic(BASE_TOPIC + "South/#");
                     regionsSelected = new boolean[]{false, true, false, false}; // Marca Sul como selecionada
+                    System.out.println("Visualizando APENAS SUL.");
                     break;
                 case "4":
-                    subscribeToTopic(BASE_TOPIC + "East/#");
                     regionsSelected = new boolean[]{false, false, true, false}; // Marca Leste como selecionada
+                    System.out.println("Visualizando APENAS LESTE.");
                     break;
                 case "5":
-                    subscribeToTopic(BASE_TOPIC + "West/#");
                     regionsSelected = new boolean[]{false, false, false, true}; // Marca Oeste como selecionada
+                    System.out.println("Visualizando APENAS OESTE.");
                     break;
                 case "6":
                     regionsSelected = new boolean[]{false, false, false, false}; // Limpa todas as seleções
+                    System.out.println("Visualização PAUSADA.");
                     break;
                 case "0":
                     exit = true;
@@ -97,96 +191,31 @@ public class EngClient {
         System.out.println("\n--- MENU DE VISUALIZAÇÃO ---");
         System.out.println("1. Visualizar TUDO");
 
-        if (regionsSelected[0])
-            System.out.print("\u001B[35m");
+        if (regionsSelected[0]) System.out.print("\u001B[35m");
         System.out.println("2. Visualizar Região NORTE\u001B[0m");
 
-        if (regionsSelected[1])
-            System.out.print("\u001B[35m");
+        if (regionsSelected[1]) System.out.print("\u001B[35m");
         System.out.println("3. Visualizar Região SUL\u001B[0m");
 
-        if (regionsSelected[2])
-            System.out.print("\u001B[35m");
+        if (regionsSelected[2]) System.out.print("\u001B[35m");
         System.out.println("4. Visualizar Região LESTE\u001B[0m");
 
-        if (regionsSelected[3])
-            System.out.print("\u001B[35m");
+        if (regionsSelected[3]) System.out.print("\u001B[35m");
         System.out.println("5. Visualizar Região OESTE\u001B[0m");
         
+        System.out.println("6. Pausar Visualização");
         System.out.println("0. Sair");
         System.out.println("----------------------------");
-        if (currentTopic != null) {
-            System.out.println("(Atualmente escutando o tópico: " + currentTopic + ")");
-        }
-    }
-
-    private void connect() throws MqttException {
-        this.mqttClient = new MqttClient(EGRESS_BROKER_URL, CLIENT_ID, new MemoryPersistence());
-
-        this.mqttClient.setCallback(new MqttCallback() {
-            @Override
-            public void connectionLost(Throwable cause) {
-                System.err.println("-> CONEXÃO PERDIDA! Tentando reconectar...");
-            }
-
-            @Override
-            public void messageArrived(String topic, MqttMessage message) {
-                String payload = new String(message.getPayload(), StandardCharsets.UTF_8);
-                // Imprime a mensagem formatada para fácil leitura
-                System.out.printf("[DADO RECEBIDO] Tópico: %s | Dados: %s%n", topic, payload);
-                logCSV.log(topic, payload); // Registra os dados no CSV
-            }
-
-            @Override
-            public void deliveryComplete(IMqttDeliveryToken token) {
-                // Não aplicável para um cliente que só se inscreve
-            }
-        });
-
-        MqttConnectOptions options = new MqttConnectOptions();
-        options.setAutomaticReconnect(true);
-        options.setCleanSession(true);
-        this.mqttClient.connect(options);
-    }
-
-    private void subscribeToTopic(String newTopic) {
-        if (mqttClient == null || !mqttClient.isConnected()) {
-            System.err.println("Não é possível se inscrever, cliente não está conectado.");
-            return;
-        }
-
-        try {
-            // Se já estiver inscrito em um tópico, cancela a inscrição primeiro
-            if (this.currentTopic != null && !this.currentTopic.equals(newTopic)) {
-                System.out.println("Cancelando inscrição do tópico antigo: " + this.currentTopic);
-                mqttClient.unsubscribe(this.currentTopic);
-            }
-
-            // Se inscreve no novo tópico
-            if (!newTopic.equals(this.currentTopic)) {
-                System.out.println("Inscrevendo-se no novo tópico: " + newTopic);
-                mqttClient.subscribe(newTopic, 1); // QoS 1
-                this.currentTopic = newTopic;
-                System.out.println("Agora você está visualizando os dados. Novas mensagens aparecerão abaixo.");
-            } else {
-                System.out.println("Você já está visualizando este tópico.");
-            }
-        } catch (MqttException e) {
-            System.err.println("Erro ao tentar se inscrever no tópico " + newTopic + ": " + e.getMessage());
-        }
     }
     
     public void stop() {
-        System.out.println("Desconectando o cliente...");
-        if (this.mqttClient != null && this.mqttClient.isConnected()) {
-            try {
-                this.mqttClient.disconnect();
-                this.mqttClient.close();
-            } catch (MqttException e) {
-                System.err.println("Erro ao desconectar: " + e.getMessage());
-            }
+        isRunning = false;
+        if (udpSocket != null && !udpSocket.isClosed()) {
+            udpSocket.close();
         }
-        this.scanner.close();
+        if (this.scanner != null) {
+            this.scanner.close();
+        }
         System.out.println("Cliente desconectado.");
     }
 }
