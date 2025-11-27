@@ -65,6 +65,23 @@ public class ApiGatewayApplication {
             proxyService.proxy(ctx, address);
         };
 
+        // Endpoint para descoberta direta de serviços (usado por clientes como eng_client)
+        app.get("/discovery/{serviceName}", ctx -> {
+            String apiKey = ctx.header("X-API-Key");
+            if (!apiKeyStore.isValid(apiKey)) {
+                ctx.status(401).result("Unauthorized");
+                return;
+            }
+            String serviceName = ctx.pathParam("serviceName");
+            Optional<String> address = discoveryService.discoverServiceAddress(serviceName);
+            
+            if (address.isPresent()) {
+                ctx.result(address.get());
+            } else {
+                ctx.status(404).result("Service not found");
+            }
+        });
+
         // CORREÇÃO: Registramos o mesmo handler para cada método HTTP em um caminho wildcard.
         // Esta é a forma mais compatível de criar um "catch-all".
         app.get("/*", gatewayHandler);

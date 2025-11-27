@@ -15,10 +15,14 @@ COPY api_gateway/src api_gateway/src/
 COPY application_server/pom.xml application_server/pom.xml
 COPY application_server/src application_server/src/
 
+COPY weather_station/pom.xml weather_station/pom.xml
+COPY weather_station/src weather_station/src/
+
 # Executa o 'package' para os módulos finais. Não precisamos mais do 'install'.
 RUN mvn -f service_discovery/pom.xml clean package -DskipTests
 RUN mvn -f api_gateway/pom.xml clean package -DskipTests
 RUN mvn -f application_server/pom.xml clean package -DskipTests
+RUN mvn -f weather_station/pom.xml clean package -DskipTests
 
 # Instala o curl para o healthcheck do Docker
 USER root
@@ -39,4 +43,9 @@ ENTRYPOINT ["java","-jar","/app/app.jar"]
 FROM eclipse-temurin:17-jre-jammy AS application-server
 WORKDIR /app
 COPY --from=build /app/application_server/target/application_server*.jar app.jar
+ENTRYPOINT ["java","-jar","/app/app.jar"]
+
+FROM eclipse-temurin:17-jre-jammy AS weather-station
+WORKDIR /app
+COPY --from=build /app/weather_station/target/weather_station*.jar app.jar
 ENTRYPOINT ["java","-jar","/app/app.jar"]

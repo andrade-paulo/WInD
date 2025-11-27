@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class DiscoveryService {
-    private static final String SERVICE_DISCOVERY_URL = "http://service-discovery:7000";
+    private static final String SERVICE_DISCOVERY_URL = "http://localhost:7000";
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final Map<String, AtomicInteger> roundRobinCounters = new ConcurrentHashMap<>();
