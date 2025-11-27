@@ -16,7 +16,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class DiscoveryService {
-    private static final String SERVICE_DISCOVERY_URL = "http://localhost:7000";
+    private static final String SERVICE_DISCOVERY_URL = System.getenv().getOrDefault("SERVICE_DISCOVERY_URL", "http://localhost:7000");
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
     private final Map<String, AtomicInteger> roundRobinCounters = new ConcurrentHashMap<>();
@@ -27,6 +27,12 @@ public class DiscoveryService {
     }
 
     public Optional<String> discoverServiceAddress(String serviceName) {
+        // Se o serviço solicitado for o próprio Service Discovery, retornamos o endereço configurado diretamente
+        if ("service-discovery".equals(serviceName)) {
+            String address = SERVICE_DISCOVERY_URL.replace("http://", "").replace("https://", "");
+            return Optional.of(address);
+        }
+
         try {
             HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(SERVICE_DISCOVERY_URL + "/services/" + serviceName))

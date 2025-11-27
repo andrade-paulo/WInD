@@ -61,7 +61,7 @@ public class EngClient {
             
             // Parse port from address (assuming host:port)
             String[] parts = address.split(":");
-            int port = Integer.parseInt(parts[1]);
+            int port = Integer.parseInt(parts[1].subSequence(0, 4).toString());
 
             System.out.println("[INIT] Starting UDP Listener on port " + port + "...");
             startUdpListener(port);
@@ -80,7 +80,7 @@ public class EngClient {
     private String getServiceAddress(String serviceName) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
-                    .uri(URI.create(gatewayUrl + "/discovery/" + serviceName))
+                    .uri(URI.create(gatewayUrl + "/services/" + serviceName))
                     .header("X-API-Key", API_KEY)
                     .GET()
                     .build();

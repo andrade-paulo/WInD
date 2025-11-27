@@ -12,7 +12,8 @@ public class ApiGatewayApplication {
 
     private static final Map<String, String> SERVICE_ROUTE_MAP = Map.of(
         "app", "application-server",
-        "broker", "wing-egress-broker"
+        "broker", "wing-egress-broker",
+        "services", "service-discovery"
     );
 
     public static void main(String[] args) {
