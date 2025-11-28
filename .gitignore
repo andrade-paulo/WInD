@@ -4,3 +4,4 @@ wind-mc-*/
 *.dat
 *.txt
 *dependency-reduced-pom.xml
+*.jks

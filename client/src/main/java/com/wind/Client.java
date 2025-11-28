@@ -18,8 +18,12 @@ public class Client {
                 "              Weather Information Distributor              \r\n" +
                 "===========================================================\r\n");
 
-        System.out.print("Insira a URL do API Gateway (ex: http://localhost:80): ");
+        System.out.print("Insira a URL do API Gateway (padrão: http://localhost:8000): ");
         String gatewayUrl = scanner.nextLine();
+
+        if (gatewayUrl.isBlank()) {
+            gatewayUrl = "http://localhost:8000";
+        }
 
         if (!gatewayUrl.toLowerCase().startsWith("http://") && !gatewayUrl.toLowerCase().startsWith("https://")) {
             gatewayUrl = "http://" + gatewayUrl;
@@ -31,7 +35,7 @@ public class Client {
 
         try {
             // Inicia a interface do usuário
-            View.showMenu();
+            View.showLoginMenu();
         } catch (Exception e) {
             System.err.println(Color.RED + "Um erro inesperado ocorreu: " + e.getMessage() + Color.RESET);
         } finally {

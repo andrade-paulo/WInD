@@ -8,8 +8,6 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 import com.wind.model.DAO.LogDAO;
-import com.wind.entities.WeatherData;
-import com.wind.entities.MicrocontrollerEntity;
 
 public class Hash<T> implements Serializable, Iterable<T> {
     @SuppressWarnings("hiding")
@@ -255,44 +253,16 @@ public class Hash<T> implements Serializable, Iterable<T> {
         }
     }
 
-    public WeatherData[] getAllWeatherData() {
+    public List<T> getAll() {
         lock.lock();
         try {
-            WeatherData[] weatherData = new WeatherData[ocupacao];
-
-            int j = 0;
+            List<T> list = new ArrayList<>();
             for (int i = 0; i < tamanho; i++) {
-                if (tabela[i] != null && tabela[i].valor instanceof WeatherData) {
-                    weatherData[j++] = (WeatherData) tabela[i].valor;
+                if (tabela[i] != null) {
+                    list.add(tabela[i].valor);
                 }
             }
-
-            return weatherData;
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    public WeatherData[] getWeatherByMicrocontroller(MicrocontrollerEntity microcontroller) {
-        lock.lock();
-        try {
-            // Usa uma lista para armazenar dinamicamente os resultados encontrados
-            List<WeatherData> weatherDataList = new ArrayList<>();
-
-            for (int i = 0; i < tamanho; i++) {
-                if (tabela[i] != null && tabela[i].valor instanceof WeatherData) {
-                    WeatherData weather = (WeatherData) tabela[i].valor;
-
-                    // Garante que o microcontrolador não é nulo antes de comparar
-                    if (weather.getMicrocontroller() != null && weather.getMicrocontroller().equals(microcontroller)) {
-                        weatherDataList.add(weather);
-                    }
-                }
-            }
-
-            // Converte a lista para um array do tamanho exato dos elementos encontrados
-            return weatherDataList.toArray(new WeatherData[0]);
-            
+            return list;
         } finally {
             lock.unlock();
         }
