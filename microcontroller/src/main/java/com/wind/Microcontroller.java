@@ -44,7 +44,6 @@ public class Microcontroller {
     private DatagramSocket socket;
     private SecretKey aesKey;
     private final HttpClient httpClient;
-    private static final String API_KEY = "super-secret-key-123";
     private static final String KEY_FILE_PREFIX = "mc_key_";
 
     public Microcontroller(int id, String location, String serverHost, int serverPort, int localPort, Character prefix, Character suffix, Character separator) {
@@ -144,35 +143,6 @@ public class Microcontroller {
         }
     }
 
-    private boolean connect() {
-        try {
-            if (socket == null || socket.isClosed()) {
-                // Bind to the specific local port if provided
-                if (localPort > 0) {
-                    socket = new DatagramSocket(localPort);
-                } else {
-                    socket = new DatagramSocket();
-                }
-                System.out.println("[UDP] Socket created. Bound to local port: " + socket.getLocalPort());
-            }
-            return true;
-        } catch (IOException e) {
-            System.err.println("Error creating socket: " + e.getMessage());
-            if (localPort > 0 && localPort < 1024) {
-                System.err.println("Hint: Port " + localPort + " is a privileged port. Try using a port > 1024.");
-            }
-            return false;
-        }
-    }
-
-    private void disconnect() {
-        if (socket != null && !socket.isClosed()) {
-            System.out.println("[" + new Date() + " MC-" + id + "] Closing UDP socket...");
-            socket.close();
-            System.out.println("[" + new Date() + " MC-" + id + "] Socket closed.");
-        }
-    }
-
     public void start() {
         try {
             // Perform Handshake
@@ -227,7 +197,6 @@ public class Microcontroller {
         // 1. Get Server Public Key
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(gatewayUrl + "/security/public-key"))
-                .header("X-API-Key", API_KEY)
                 .GET()
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
@@ -255,7 +224,6 @@ public class Microcontroller {
         // Include ID in the query parameter
         request = HttpRequest.newBuilder()
                 .uri(URI.create(gatewayUrl + "/security/handshake?mcId=" + id))
-                .header("X-API-Key", API_KEY)
                 .POST(HttpRequest.BodyPublishers.ofString(encryptedAesKey))
                 .build();
         

@@ -14,13 +14,6 @@ import com.wind.model.DAO.ClientDAO;
 import com.wind.service.ServiceInstancePayload;
 import com.wind.service.ServiceRegistrar;
 import com.wind.security.RSA;
-import com.wind.security.AES;
-import com.wind.security.KeyStoreManager;
-import javax.crypto.SecretKey;
-import javax.crypto.spec.SecretKeySpec;
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 
 import io.javalin.Javalin;
 
@@ -59,17 +52,12 @@ public class ApplicationServer {
     // Map to store AES keys for each session/client (simplified for this context)
     // In a real scenario, this should be associated with a session token
     private static final Map<String, byte[]> sessionKeys = new ConcurrentHashMap<>();
-    // Map to store AES keys specifically for Microcontrollers by ID
-    private static final Map<Integer, byte[]> microcontrollerKeys = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
         try {
             KeyPair keyPair = RSA.generateKeyPair();
             privateKey = keyPair.getPrivate();
             publicKey = keyPair.getPublic();
-            
-            // Load persisted keys
-            loadMicrocontrollerKeys();
         } catch (Exception e) {
             System.err.println("Erro ao gerar par de chaves RSA: " + e.getMessage());
             System.exit(1);
@@ -96,28 +84,14 @@ public class ApplicationServer {
 
         app.post("/app/security/handshake", ctx -> {
             String encryptedAesKey = ctx.body();
-            String mcIdParam = ctx.queryParam("mcId");
-
+            
             try {
                 byte[] aesKey = RSA.decrypt(encryptedAesKey, privateKey);
                 
-                if (mcIdParam != null) {
-                    // Microcontroller Handshake
-                    int mcId = Integer.parseInt(mcIdParam);
-                    if (microcontrollerKeys.containsKey(mcId)) {
-                        LogDAO.addLog("[HANDSHAKE REJECTED] Microcontrolador " + mcId + " já possui uma chave registrada.");
-                        ctx.status(409).result("Microcontroller ID already registered");
-                        return;
-                    }
-                    microcontrollerKeys.put(mcId, aesKey);
-                    saveMicrocontrollerKeys();
-                    LogDAO.addLog("[HANDSHAKE] Handshake realizado com sucesso para Microcontrolador " + mcId);
-                } else {
-                    // Client/EngClient Handshake (Session based)
-                    String sessionId = ctx.ip(); 
-                    sessionKeys.put(sessionId, aesKey);
-                    LogDAO.addLog("[HANDSHAKE] Handshake realizado com sucesso para " + sessionId);
-                }
+                // Client/EngClient Handshake (Session based)
+                String sessionId = ctx.ip(); 
+                sessionKeys.put(sessionId, aesKey);
+                LogDAO.addLog("[HANDSHAKE] Handshake realizado com sucesso para " + sessionId);
                 
                 ctx.status(200).result("Handshake successful");
             } catch (Exception e) {
@@ -238,67 +212,6 @@ public class ApplicationServer {
         } catch (Exception e) {
             System.err.println("Erro no parsing da mensagem: " + e.getMessage());
             LogDAO.addLog("[PARSE_ERROR] Mensagem inválida recebida do RabbitMQ: " + message);
-        }
-    }
-
-    private static final String MC_KEYS_FILE = "/app/database/mc_keys.dat";
-
-    private static void saveMicrocontrollerKeys() {
-        try {
-            KeyStoreManager ksm = new KeyStoreManager();
-            SecretKey masterKey = ksm.getSecretKey();
-            AES aes = new AES(masterKey);
-
-            // Serialize Map
-            java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
-            java.io.ObjectOutputStream oos = new java.io.ObjectOutputStream(baos);
-            oos.writeObject(microcontrollerKeys);
-            oos.close();
-            byte[] data = baos.toByteArray();
-
-            // Encrypt
-            byte[] encrypted = aes.encrypt(data); // Returns IV+Ciphertext
-
-            // Write to file
-            File file = new File(MC_KEYS_FILE);
-            File parent = file.getParentFile();
-            if (parent != null && !parent.exists()) parent.mkdirs();
-            
-            try (FileOutputStream fos = new FileOutputStream(file)) {
-                fos.write(encrypted);
-            }
-        } catch (Exception e) {
-            LogDAO.addLog("[KEYS_SAVE_ERROR] Failed to save MC keys: " + e.getMessage());
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private static void loadMicrocontrollerKeys() {
-        File file = new File(MC_KEYS_FILE);
-        if (!file.exists()) return;
-
-        try {
-            KeyStoreManager ksm = new KeyStoreManager();
-            SecretKey masterKey = ksm.getSecretKey();
-            AES aes = new AES(masterKey);
-
-            try (FileInputStream fis = new FileInputStream(file)) {
-                byte[] encrypted = fis.readAllBytes();
-                
-                // Decrypt
-                byte[] decrypted = aes.decrypt(encrypted);
-                if (decrypted == null) throw new Exception("Decryption failed");
-
-                // Deserialize
-                java.io.ByteArrayInputStream bais = new java.io.ByteArrayInputStream(decrypted);
-                java.io.ObjectInputStream ois = new java.io.ObjectInputStream(bais);
-                Map<Integer, byte[]> loadedKeys = (Map<Integer, byte[]>) ois.readObject();
-                
-                microcontrollerKeys.putAll(loadedKeys);
-                LogDAO.addLog("[KEYS_LOAD] Loaded " + loadedKeys.size() + " MC keys.");
-            }
-        } catch (Exception e) {
-            LogDAO.addLog("[KEYS_LOAD_ERROR] Failed to load MC keys: " + e.getMessage());
         }
     }
 
