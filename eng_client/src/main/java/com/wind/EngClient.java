@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.wind.entities.MicrocontrollerEntity;
 import com.wind.model.LogCSV;
+import com.wind.security.RSA;
 
 import java.io.IOException;
 import java.net.DatagramPacket;
@@ -13,8 +14,11 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.security.PublicKey;
 import java.util.List;
 import java.util.Scanner;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
 
 public class EngClient {
     private static final String API_KEY = "super-secret-key-123";
@@ -29,6 +33,7 @@ public class EngClient {
     private final ObjectMapper objectMapper;
     private String gatewayUrl;
     private String weatherStationManagementUrl;
+    private SecretKey aesKey;
 
     private LogCSV logCSV = new LogCSV();
 
@@ -55,6 +60,8 @@ public class EngClient {
             if (!this.gatewayUrl.toLowerCase().startsWith("http://") && !this.gatewayUrl.toLowerCase().startsWith("https://")) {
                 this.gatewayUrl = "http://" + this.gatewayUrl;
             }
+
+            performHandshake();
 
             System.out.println("[INIT] Requesting WeatherStation address from API Gateway...");
             String address = getServiceAddress(WEATHER_STATION_SERVICE_NAME);
@@ -96,6 +103,44 @@ public class EngClient {
         } finally {
             stop();
         }
+    }
+
+    private void performHandshake() throws Exception {
+        // 1. Get Server Public Key
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(gatewayUrl + "/app/security/public-key"))
+                .header("X-API-Key", API_KEY)
+                .GET()
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        
+        if (response.statusCode() != 200) {
+            throw new Exception("Failed to retrieve public key");
+        }
+        
+        PublicKey serverPublicKey = RSA.getPublicKeyFromBase64(response.body());
+
+        // 2. Generate AES Key
+        KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+        keyGen.init(256);
+        aesKey = keyGen.generateKey();
+
+        // 3. Encrypt AES Key with RSA
+        String encryptedAesKey = RSA.encrypt(aesKey.getEncoded(), serverPublicKey);
+
+        // 4. Send Encrypted AES Key to Server
+        request = HttpRequest.newBuilder()
+                .uri(URI.create(gatewayUrl + "/app/security/handshake"))
+                .header("X-API-Key", API_KEY)
+                .POST(HttpRequest.BodyPublishers.ofString(encryptedAesKey))
+                .build();
+        
+        response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        
+        if (response.statusCode() != 200) {
+            throw new Exception("Handshake failed");
+        }
+        System.out.println("Handshake de segurança realizado com sucesso.");
     }
 
     private String getServiceAddress(String serviceName) {

@@ -221,41 +221,9 @@ public class ApplicationServer {
     private static void parseAndPersistData(String message) {
         try {
             String[] parts = message.split("\\|");
-            if (parts.length < 1) return;
-
-            int stationId = Integer.parseInt(parts[0].trim());
-
-            // Decryption Logic
-            if (microcontrollerKeys.containsKey(stationId) && parts.length == 2) {
-                try {
-                    byte[] keyBytes = microcontrollerKeys.get(stationId);
-                    SecretKey key = new SecretKeySpec(keyBytes, "AES");
-                    AES aes = new AES(key);
-                    
-                    String encryptedPayload = parts[1].trim();
-                    String decrypted = aes.decrypt(encryptedPayload);
-                    
-                    if (decrypted != null) {
-                        message = decrypted;
-                        // Normalize separators (since WeatherStation couldn't do it on encrypted data)
-                        if (message.contains(";")) message = message.replace(";", "|");
-                        if (message.contains(",")) message = message.replace(",", "|");
-                        if (message.contains("#")) message = message.replace("#", "|");
-                        
-                        parts = message.split("\\|");
-                    } else {
-                        LogDAO.addLog("[DECRYPT_ERROR] Failed to decrypt message from ID " + stationId);
-                        return;
-                    }
-                } catch (Exception e) {
-                     LogDAO.addLog("[DECRYPT_ERROR] Exception decrypting message from ID " + stationId + ": " + e.getMessage());
-                     return;
-                }
-            }
-
             if (parts.length < 6) return; // Ignora mensagens malformadas
 
-            stationId = Integer.parseInt(parts[0].trim());
+            int stationId = Integer.parseInt(parts[0].trim());
             String location = parts[1].trim();
             float pressure = Float.parseFloat(parts[2].trim());
             float radiation = Float.parseFloat(parts[3].trim());

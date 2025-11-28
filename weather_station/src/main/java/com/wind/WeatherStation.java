@@ -6,9 +6,18 @@ import com.wind.service.ManagementService;
 import com.wind.service.RabbitMQService;
 import com.wind.service.ServiceDiscoveryService;
 import com.wind.service.UdpService;
+import com.wind.security.RSA;
+import com.wind.security.AES;
 
 import java.net.InetSocketAddress;
 import java.util.UUID;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 
 public class WeatherStation {
 
@@ -37,6 +46,10 @@ public class WeatherStation {
     private UdpService udpService;
     private ManagementService managementService;
     private MicrocontrollerDAO microcontrollerDAO;
+    
+    private PrivateKey privateKey;
+    private PublicKey publicKey;
+    private final Map<Integer, byte[]> microcontrollerKeys = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
         System.out.println("WInD - WeatherStation Service (UDP Version)");
@@ -54,6 +67,11 @@ public class WeatherStation {
 
     public void start() {
         try {
+            // Initialize Security Keys
+            KeyPair keyPair = RSA.generateKeyPair();
+            this.privateKey = keyPair.getPrivate();
+            this.publicKey = keyPair.getPublic();
+
             // Initialize DAO
             this.microcontrollerDAO = new MicrocontrollerDAO();
 
@@ -61,7 +79,7 @@ public class WeatherStation {
             this.serviceDiscoveryService = new ServiceDiscoveryService(SERVICE_DISCOVERY_URL, SERVICE_NAME, INSTANCE_ID, SERVICE_ADDRESS);
             this.rabbitMQService = new RabbitMQService(RABBITMQ_HOST, RABBITMQ_USER, RABBITMQ_PASS, RABBITMQ_EXCHANGE_NAME);
             this.udpService = new UdpService(INGRESS_PORT, EGRESS_HOST, EGRESS_PORT);
-            this.managementService = new ManagementService(MANAGEMENT_PORT, microcontrollerDAO);
+            this.managementService = new ManagementService(MANAGEMENT_PORT, microcontrollerDAO, publicKey, privateKey, microcontrollerKeys);
 
             System.out.println("[INIT] Connecting to RabbitMQ (" + RABBITMQ_HOST + ")...");
             rabbitMQService.connect();
@@ -107,6 +125,39 @@ public class WeatherStation {
     private void processMessage(String rawPayload, InetSocketAddress sender) {
         String processedPayload = rawPayload.trim();
         
+        // Try to parse ID and Encrypted Payload
+        // Format: ID|EncryptedBase64
+        String[] parts = processedPayload.split("\\|");
+        
+        if (parts.length == 2) {
+            try {
+                int id = Integer.parseInt(parts[0]);
+                String encryptedData = parts[1];
+                
+                if (microcontrollerKeys.containsKey(id)) {
+                    byte[] keyBytes = microcontrollerKeys.get(id);
+                    SecretKey key = new SecretKeySpec(keyBytes, "AES");
+                    AES aes = new AES(key);
+                    
+                    String decrypted = aes.decrypt(encryptedData);
+                    if (decrypted != null) {
+                        processedPayload = decrypted.trim();
+                        System.out.println("   [DECRYPTED] Payload from ID " + id + ": " + processedPayload);
+                    } else {
+                        System.err.println("   [ERROR] Failed to decrypt payload from ID " + id);
+                        return;
+                    }
+                } else {
+                    System.out.println("   [UNKNOWN KEY] No key found for ID " + id + ". Is handshake done?");
+                    // Fallback: maybe it's not encrypted? Or just drop it.
+                    // For now, let's assume if it looks like ID|Data it might be unencrypted legacy, 
+                    // but if we enforce encryption, we should drop or log warning.
+                }
+            } catch (NumberFormatException e) {
+                // Not an ID|Encrypted format, maybe legacy raw format
+            }
+        }
+
         if ((processedPayload.startsWith("(") || processedPayload.startsWith("[") || processedPayload.startsWith("{")) && 
             (processedPayload.endsWith(")") || processedPayload.endsWith("]") || processedPayload.endsWith("}"))) {
                 processedPayload = processedPayload.substring(1, processedPayload.length() - 1).trim();
@@ -125,11 +176,16 @@ public class WeatherStation {
 
         // Validate if the Microcontroller is registered
         try {
-            String[] parts = processedPayload.split("\\|");
+            parts = processedPayload.split("\\|");
             if (parts.length > 0) {
                 // Extract ID (remove non-numeric prefix if present, e.g., "A1" -> "1")
                 String idString = parts[0];
                 
+                // Handle potential prefix in ID (e.g. "A1")
+                if (idString.matches(".*\\d.*")) {
+                     idString = idString.replaceAll("\\D+","");
+                }
+
                 if (!idString.isEmpty()) {
                     int id = Integer.parseInt(idString);
                     MicrocontrollerEntity mc = microcontrollerDAO.getMicrocontroller(id);
@@ -138,10 +194,6 @@ public class WeatherStation {
                         System.out.println("   [ACCESS DENIED] Ignored data from unregistered Microcontroller ID: " + id);
                         return; // Stop processing this message
                     }
-
-                    // Validation removed as per request. Only ID existence is checked.
-                    // System.out.println("   [DEBUG] Validated ID: " + id);
-
                 } else {
                     System.out.println("   [INVALID] Could not parse ID from payload: " + parts[0]);
                     return;

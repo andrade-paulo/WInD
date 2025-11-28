@@ -6,11 +6,16 @@ import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import com.wind.entities.MicrocontrollerEntity;
 import com.wind.model.DAO.MicrocontrollerDAO;
+import com.wind.security.RSA;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ManagementService {
 
@@ -18,16 +23,25 @@ public class ManagementService {
     private final MicrocontrollerDAO microcontrollerDAO;
     private final ObjectMapper objectMapper;
     private HttpServer server;
+    
+    private final PublicKey publicKey;
+    private final PrivateKey privateKey;
+    private final Map<Integer, byte[]> microcontrollerKeys;
 
-    public ManagementService(int port, MicrocontrollerDAO microcontrollerDAO) {
+    public ManagementService(int port, MicrocontrollerDAO microcontrollerDAO, PublicKey publicKey, PrivateKey privateKey, Map<Integer, byte[]> microcontrollerKeys) {
         this.port = port;
         this.microcontrollerDAO = microcontrollerDAO;
         this.objectMapper = new ObjectMapper();
+        this.publicKey = publicKey;
+        this.privateKey = privateKey;
+        this.microcontrollerKeys = microcontrollerKeys;
     }
 
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 0);
         server.createContext("/microcontrollers", new MicrocontrollerHandler());
+        server.createContext("/security/public-key", new PublicKeyHandler());
+        server.createContext("/security/handshake", new HandshakeHandler());
         server.setExecutor(null); // creates a default executor
         server.start();
         System.out.println("[Management Service] Started on port " + port);
@@ -38,6 +52,77 @@ public class ManagementService {
             server.stop(0);
             System.out.println("[Management Service] Stopped.");
         }
+    }
+
+    private class PublicKeyHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("GET".equals(exchange.getRequestMethod())) {
+                String response = RSA.publicKeyToBase64(publicKey);
+                sendResponse(exchange, 200, response);
+            } else {
+                sendResponse(exchange, 405, "Method not allowed");
+            }
+        }
+    }
+
+    private class HandshakeHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if ("POST".equals(exchange.getRequestMethod())) {
+                try {
+                    // Parse Query Params for mcId
+                    String query = exchange.getRequestURI().getQuery();
+                    String mcIdParam = null;
+                    if (query != null) {
+                        for (String param : query.split("&")) {
+                            String[] pair = param.split("=");
+                            if (pair.length == 2 && "mcId".equals(pair[0])) {
+                                mcIdParam = pair[1];
+                                break;
+                            }
+                        }
+                    }
+
+                    if (mcIdParam == null) {
+                        sendResponse(exchange, 400, "Missing mcId parameter");
+                        return;
+                    }
+
+                    int mcId = Integer.parseInt(mcIdParam);
+                    
+                    // Read Body
+                    String encryptedAesKey = new String(exchange.getRequestBody().readAllBytes());
+                    
+                    // Decrypt AES Key
+                    byte[] aesKey = RSA.decrypt(encryptedAesKey, privateKey);
+                    
+                    if (microcontrollerKeys.containsKey(mcId)) {
+                        System.out.println("[HANDSHAKE REJECTED] Microcontroller " + mcId + " already registered.");
+                        sendResponse(exchange, 409, "Microcontroller ID already registered");
+                        return;
+                    }
+
+                    microcontrollerKeys.put(mcId, aesKey);
+                    System.out.println("[HANDSHAKE] Successful handshake for Microcontroller " + mcId);
+                    sendResponse(exchange, 200, "Handshake successful");
+
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    sendResponse(exchange, 500, "Handshake failed: " + e.getMessage());
+                }
+            } else {
+                sendResponse(exchange, 405, "Method not allowed");
+            }
+        }
+    }
+
+    private void sendResponse(HttpExchange exchange, int statusCode, String response) throws IOException {
+        exchange.getResponseHeaders().set("Content-Type", "application/json");
+        exchange.sendResponseHeaders(statusCode, response.length());
+        OutputStream os = exchange.getResponseBody();
+        os.write(response.getBytes());
+        os.close();
     }
 
     private class MicrocontrollerHandler implements HttpHandler {
@@ -106,14 +191,6 @@ public class ManagementService {
         private void handleDelete(HttpExchange exchange, int id) throws IOException {
             microcontrollerDAO.deleteMicrocontroller(id);
             sendResponse(exchange, 200, "Deleted");
-        }
-
-        private void sendResponse(HttpExchange exchange, int statusCode, String response) throws IOException {
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(statusCode, response.length());
-            OutputStream os = exchange.getResponseBody();
-            os.write(response.getBytes());
-            os.close();
         }
     }
 }
