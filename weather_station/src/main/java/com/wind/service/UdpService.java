@@ -4,9 +4,10 @@ import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 public class UdpService {
 
@@ -29,7 +30,7 @@ public class UdpService {
         System.out.println("[Egress UDP] Socket created.");
     }
 
-    public void startIngressListener(Consumer<String> messageProcessor) {
+    public void startIngressListener(BiConsumer<String, InetSocketAddress> messageProcessor) {
         new Thread(() -> {
             try {
                 ingressSocket = new DatagramSocket(ingressPort);
@@ -40,11 +41,13 @@ public class UdpService {
                     try {
                         ingressSocket.receive(packet);
                         String rawPayload = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8);
+                        
+                        InetSocketAddress sender = new InetSocketAddress(packet.getAddress(), packet.getPort());
 
-                        System.out.println("\n-> [UDP RCV] From: " + packet.getAddress() + ":" + packet.getPort());
+                        System.out.println("\n-> [UDP RCV] From: " + sender);
                         System.out.println("   Payload: " + rawPayload);
 
-                        messageProcessor.accept(rawPayload);
+                        messageProcessor.accept(rawPayload, sender);
 
                     } catch (IOException e) {
                         if (isRunning) {

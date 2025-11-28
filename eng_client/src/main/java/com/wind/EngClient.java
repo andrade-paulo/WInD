@@ -1,5 +1,8 @@
 package com.wind;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.wind.entities.MicrocontrollerEntity;
 import com.wind.model.LogCSV;
 
 import java.io.IOException;
@@ -10,25 +13,29 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Scanner;
 
 public class EngClient {
     private static final String API_KEY = "super-secret-key-123";
     private static final String WEATHER_STATION_SERVICE_NAME = "weather-station";
+    private static final int MANAGEMENT_PORT = 9090; // Default management port
 
     private DatagramSocket udpSocket;
     private volatile boolean isRunning = true;
+    private volatile boolean isMonitoring = false;
     private final Scanner scanner;
     private final HttpClient httpClient;
+    private final ObjectMapper objectMapper;
     private String gatewayUrl;
-
-    private boolean[] regionsSelected = new boolean[4]; // North, South, East, West
+    private String weatherStationManagementUrl;
 
     private LogCSV logCSV = new LogCSV();
 
     public EngClient() {
         this.scanner = new Scanner(System.in);
         this.httpClient = HttpClient.newHttpClient();
+        this.objectMapper = new ObjectMapper();
     }
 
     public static void main(String[] args) {
@@ -41,9 +48,9 @@ public class EngClient {
 
     public void start() {
         try {
-            System.out.print("Insira a URL do API Gateway (ex: http://localhost:80): ");
+            System.out.print("Insira a URL do API Gateway (ex: http://localhost:8000): ");
             String inputUrl = scanner.nextLine().trim();
-            this.gatewayUrl = inputUrl.isEmpty() ? "http://localhost:80" : inputUrl;
+            this.gatewayUrl = inputUrl.isEmpty() ? "http://localhost:8000" : inputUrl;
 
             if (!this.gatewayUrl.toLowerCase().startsWith("http://") && !this.gatewayUrl.toLowerCase().startsWith("https://")) {
                 this.gatewayUrl = "http://" + this.gatewayUrl;
@@ -59,9 +66,23 @@ public class EngClient {
 
             System.out.println("[DISCOVERY] WeatherStation found at: " + address);
             
+            // Clean up address (remove quotes and brackets if present)
+            address = address.replace("\"", "").replace("[", "").replace("]", "").trim();
+
             // Parse port from address (assuming host:port)
             String[] parts = address.split(":");
-            int port = Integer.parseInt(parts[1].subSequence(0, 4).toString());
+            String host = parts[0];
+            
+            // Fix for local docker environment where host.docker.internal is not resolvable by client
+            if ("host.docker.internal".equals(host)) {
+                host = "localhost";
+            }
+
+            int port = Integer.parseInt(parts[1]);
+
+            // Construct Management URL
+            this.weatherStationManagementUrl = "http://" + host + ":" + MANAGEMENT_PORT;
+            System.out.println("[INIT] WeatherStation Management URL: " + this.weatherStationManagementUrl);
 
             System.out.println("[INIT] Starting UDP Listener on port " + port + "...");
             startUdpListener(port);
@@ -124,24 +145,15 @@ public class EngClient {
     }
 
     private void processMessage(String payload) {
-        // Payload format: ID|Location|Pressure|Radiation|Temp|Humidity
-        // Example: 1|North|1000.0|500.0|25.0|50.0
-        
+        if (!isMonitoring) return;
+
         String[] parts = payload.split("\\|");
         if (parts.length < 2) return;
 
         String location = parts[1];
-        boolean show = false;
 
-        if (location.equalsIgnoreCase("North") && regionsSelected[0]) show = true;
-        else if (location.equalsIgnoreCase("South") && regionsSelected[1]) show = true;
-        else if (location.equalsIgnoreCase("East") && regionsSelected[2]) show = true;
-        else if (location.equalsIgnoreCase("West") && regionsSelected[3]) show = true;
-
-        if (show) {
-            System.out.printf("[DADO RECEBIDO] Local: %s | Dados: %s%n", location, payload);
-            logCSV.log("udp/realtime/" + location, payload);
-        }
+        System.out.printf("[DADO RECEBIDO] Local: %s | Dados: %s%n", location, payload);
+        logCSV.log("udp/realtime/" + location, payload);
     }
 
     private void mainMenuLoop() {
@@ -153,32 +165,23 @@ public class EngClient {
 
             switch (choice) {
                 case "1":
-                    regionsSelected = new boolean[]{true, true, true, true}; // Marca todas como selecionadas
-                    System.out.println("Visualizando TUDO.");
+                    System.out.println("Monitorando dados... (Pressione Enter para parar)");
+                    isMonitoring = true;
+                    scanner.nextLine();
+                    isMonitoring = false;
+                    System.out.println("Monitoramento pausado.");
                     break;
                 case "2":
-                    regionsSelected = new boolean[]{true, false, false, false}; // Marca Norte como selecionada
-                    System.out.println("Visualizando APENAS NORTE.");
+                    listMicrocontrollers();
                     break;
                 case "3":
-                    regionsSelected = new boolean[]{false, true, false, false}; // Marca Sul como selecionada
-                    System.out.println("Visualizando APENAS SUL.");
+                    registerMicrocontroller();
                     break;
                 case "4":
-                    regionsSelected = new boolean[]{false, false, true, false}; // Marca Leste como selecionada
-                    System.out.println("Visualizando APENAS LESTE.");
-                    break;
-                case "5":
-                    regionsSelected = new boolean[]{false, false, false, true}; // Marca Oeste como selecionada
-                    System.out.println("Visualizando APENAS OESTE.");
-                    break;
-                case "6":
-                    regionsSelected = new boolean[]{false, false, false, false}; // Limpa todas as seleções
-                    System.out.println("Visualização PAUSADA.");
+                    removeMicrocontroller();
                     break;
                 case "0":
                     exit = true;
-                    System.out.println("Saindo...");
                     break;
                 default:
                     System.out.println("Opção inválida. Tente novamente.");
@@ -189,23 +192,93 @@ public class EngClient {
 
     private void displayMenu() {
         System.out.println("\n--- MENU DE VISUALIZAÇÃO ---");
-        System.out.println("1. Visualizar TUDO");
-
-        if (regionsSelected[0]) System.out.print("\u001B[35m");
-        System.out.println("2. Visualizar Região NORTE\u001B[0m");
-
-        if (regionsSelected[1]) System.out.print("\u001B[35m");
-        System.out.println("3. Visualizar Região SUL\u001B[0m");
-
-        if (regionsSelected[2]) System.out.print("\u001B[35m");
-        System.out.println("4. Visualizar Região LESTE\u001B[0m");
-
-        if (regionsSelected[3]) System.out.print("\u001B[35m");
-        System.out.println("5. Visualizar Região OESTE\u001B[0m");
-        
-        System.out.println("6. Pausar Visualização");
+        System.out.println("1. Monitorar Dados");
+        System.out.println("2. Listar Microcontroladores");
+        System.out.println("3. Cadastrar Microcontrolador");
+        System.out.println("4. Remover Microcontrolador");
         System.out.println("0. Sair");
         System.out.println("----------------------------");
+    }
+
+    private void listMicrocontrollers() {
+        try {
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(weatherStationManagementUrl + "/microcontrollers"))
+                    .GET()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                List<MicrocontrollerEntity> list = objectMapper.readValue(response.body(), new TypeReference<List<MicrocontrollerEntity>>() {});
+                System.out.println("\n--- Microcontroladores Cadastrados ---");
+                if (list.isEmpty()) {
+                    System.out.println("Nenhum microcontrolador encontrado.");
+                } else {
+                    for (MicrocontrollerEntity mc : list) {
+                        System.out.println(mc);
+                        System.out.println("-------------------------");
+                    }
+                }
+            } else {
+                System.err.println("Erro ao listar microcontroladores: " + response.statusCode());
+            }
+        } catch (Exception e) {
+            System.err.println("Erro: " + e.getMessage());
+        }
+    }
+
+    private void registerMicrocontroller() {
+        try {
+            System.out.println("\n--- Cadastro de Microcontrolador ---");
+            System.out.print("ID (0 para gerar automático): ");
+            int id = Integer.parseInt(scanner.nextLine());
+            System.out.print("Região: ");
+            String region = scanner.nextLine();
+
+            MicrocontrollerEntity mc = new MicrocontrollerEntity(id, region);
+            String json = objectMapper.writeValueAsString(mc);
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(weatherStationManagementUrl + "/microcontrollers"))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(json))
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 201) {
+                System.out.println("Microcontrolador cadastrado com sucesso!");
+            } else {
+                System.err.println("Erro ao cadastrar: " + response.statusCode());
+            }
+        } catch (Exception e) {
+            System.err.println("Erro: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void removeMicrocontroller() {
+        try {
+            System.out.println("\n--- Remover Microcontrolador ---");
+            System.out.print("ID do Microcontrolador: ");
+            int id = Integer.parseInt(scanner.nextLine());
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(weatherStationManagementUrl + "/microcontrollers/" + id))
+                    .DELETE()
+                    .build();
+
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+            if (response.statusCode() == 200) {
+                System.out.println("Microcontrolador removido com sucesso!");
+            } else {
+                System.err.println("Erro ao remover: " + response.statusCode());
+            }
+        } catch (Exception e) {
+            System.err.println("Erro: " + e.getMessage());
+        }
     }
     
     public void stop() {

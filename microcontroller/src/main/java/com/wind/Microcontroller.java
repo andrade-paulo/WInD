@@ -18,6 +18,7 @@ public class Microcontroller {
     private final String location;
     private final String serverHost;
     private final int serverPort;
+    private final int localPort; // New field for the local binding port
 
     private final Character prefix;
     private final Character suffix;
@@ -27,12 +28,13 @@ public class Microcontroller {
     private final Random random;
     private DatagramSocket socket;
 
-    public Microcontroller(int id, String location, String serverHost, int serverPort, Character prefix, Character suffix, Character separator) {
+    public Microcontroller(int id, String location, String serverHost, int serverPort, int localPort, Character prefix, Character suffix, Character separator) {
         this.id = id;
         // Valida a localização para garantir que seja uma das opções esperadas
         this.location = location;
         this.serverHost = serverHost;
         this.serverPort = serverPort;
+        this.localPort = localPort;
         
         this.prefix = prefix != null ? prefix : '\0';
         this.suffix = suffix != null ? suffix : '\0';
@@ -45,6 +47,14 @@ public class Microcontroller {
         System.out.println("WInD - Microcontroller Simulation (UDP Version)");
 
         try (Scanner scanner = new Scanner(System.in)) {
+            // Print it's own IP address
+            try {
+                InetAddress localAddress = InetAddress.getLocalHost();
+                System.out.println("Local IP Address: " + localAddress.getHostAddress());
+            } catch (IOException e) {
+                System.err.println("Error retrieving local IP address: " + e.getMessage());
+            }
+
             System.out.print("ID: ");
             int id = scanner.nextInt();
             scanner.nextLine(); // Consume newline
@@ -85,12 +95,16 @@ public class Microcontroller {
             String portStr = scanner.nextLine().trim();
             int serverPort = portStr.isEmpty() ? 9876 : Integer.parseInt(portStr);
 
+            // Local Port Configuration removed - using random port
+            int localPort = 0;
+
             System.out.println("===================================================");
             System.out.println("        Microcontroller Simulation Starting");
             System.out.println("  Targeting UDP Server at " + serverHost + ":" + serverPort);
+            System.out.println("  Binding to Random Local Port");
             System.out.println("===================================================");
 
-            Microcontroller mc = new Microcontroller(id, location, serverHost, serverPort, prefix, suffix, separator);
+            Microcontroller mc = new Microcontroller(id, location, serverHost, serverPort, localPort, prefix, suffix, separator);
             Thread mcThread = new Thread(mc::startSendingData, "UDP-MC-" + id);
             mcThread.start();
 
@@ -113,12 +127,20 @@ public class Microcontroller {
     private boolean connect() {
         try {
             if (socket == null || socket.isClosed()) {
-                socket = new DatagramSocket();
-                System.out.println("[" + new Date() + " MC-" + id + "] UDP Socket created.");
+                // Bind to the specific local port if provided
+                if (localPort > 0) {
+                    socket = new DatagramSocket(localPort);
+                } else {
+                    socket = new DatagramSocket();
+                }
+                System.out.println("[UDP] Socket created. Bound to local port: " + socket.getLocalPort());
             }
             return true;
-        } catch (Exception e) {
-            System.err.println("[" + new Date() + " MC-" + id + "] Error creating UDP socket: " + e.getMessage());
+        } catch (IOException e) {
+            System.err.println("Error creating socket: " + e.getMessage());
+            if (localPort > 0 && localPort < 1024) {
+                System.err.println("Hint: Port " + localPort + " is a privileged port. Try using a port > 1024.");
+            }
             return false;
         }
     }
@@ -160,7 +182,7 @@ public class Microcontroller {
 
             try {
                 socket.send(packet);
-                System.out.println("[" + new Date() + " MC-" + id + "] Sent UDP packet to " + serverHost + ":" + serverPort + " : " + dataString);
+                System.out.println("[" + new Date() + " MC-" + id + "] Sent UDP packet to " + serverHost + ":" + serverPort + " (from port " + socket.getLocalPort() + ") : " + dataString);
 
             } catch (IOException e) {
                 System.err.println("[" + new Date() + " MC-" + id + "] Error sending packet: " + e.getMessage());

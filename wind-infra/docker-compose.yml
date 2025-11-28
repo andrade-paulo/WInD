@@ -47,6 +47,8 @@ services:
       dockerfile: Dockerfile
       target: api-gateway
     container_name: api-gateway
+    ports:
+      - "8000:8000"
     networks:
       - wind_network
     environment:
@@ -84,6 +86,7 @@ services:
       - wind_network
     ports:
       - "9876:9876/udp"
+      - "9090:9090"
     environment:
       - RABBITMQ_HOST=wind-internal-bus
       - SERVICE_DISCOVERY_URL=http://service-discovery:7000

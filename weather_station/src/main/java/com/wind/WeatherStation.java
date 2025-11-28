@@ -1,9 +1,13 @@
 package com.wind; 
 
+import com.wind.entities.MicrocontrollerEntity;
+import com.wind.model.DAO.MicrocontrollerDAO;
+import com.wind.service.ManagementService;
 import com.wind.service.RabbitMQService;
 import com.wind.service.ServiceDiscoveryService;
 import com.wind.service.UdpService;
 
+import java.net.InetSocketAddress;
 import java.util.UUID;
 
 public class WeatherStation {
@@ -25,9 +29,14 @@ public class WeatherStation {
     private static final String INSTANCE_ID = "weather-station-" + UUID.randomUUID();
     private static final String SERVICE_ADDRESS = EGRESS_HOST + ":" + EGRESS_PORT;
 
+    // Management
+    private static final int MANAGEMENT_PORT = Integer.parseInt(System.getenv().getOrDefault("MANAGEMENT_PORT", "9090"));
+
     private ServiceDiscoveryService serviceDiscoveryService;
     private RabbitMQService rabbitMQService;
     private UdpService udpService;
+    private ManagementService managementService;
+    private MicrocontrollerDAO microcontrollerDAO;
 
     public static void main(String[] args) {
         System.out.println("WInD - WeatherStation Service (UDP Version)");
@@ -45,10 +54,14 @@ public class WeatherStation {
 
     public void start() {
         try {
+            // Initialize DAO
+            this.microcontrollerDAO = new MicrocontrollerDAO();
+
             // Initialize Services
             this.serviceDiscoveryService = new ServiceDiscoveryService(SERVICE_DISCOVERY_URL, SERVICE_NAME, INSTANCE_ID, SERVICE_ADDRESS);
             this.rabbitMQService = new RabbitMQService(RABBITMQ_HOST, RABBITMQ_USER, RABBITMQ_PASS, RABBITMQ_EXCHANGE_NAME);
             this.udpService = new UdpService(INGRESS_PORT, EGRESS_HOST, EGRESS_PORT);
+            this.managementService = new ManagementService(MANAGEMENT_PORT, microcontrollerDAO);
 
             System.out.println("[INIT] Connecting to RabbitMQ (" + RABBITMQ_HOST + ")...");
             rabbitMQService.connect();
@@ -58,6 +71,9 @@ public class WeatherStation {
 
             System.out.println("[INIT] Starting Ingress UDP Listener on port " + INGRESS_PORT + "...");
             udpService.startIngressListener(this::processMessage);
+
+            System.out.println("[INIT] Starting Management Service on port " + MANAGEMENT_PORT + "...");
+            managementService.start();
 
             System.out.println("[INIT] Registering with Service Discovery...");
             serviceDiscoveryService.registerService();
@@ -83,9 +99,12 @@ public class WeatherStation {
         if (rabbitMQService != null) {
             rabbitMQService.close();
         }
+        if (managementService != null) {
+            managementService.stop();
+        }
     }
 
-    private void processMessage(String rawPayload) {
+    private void processMessage(String rawPayload, InetSocketAddress sender) {
         String processedPayload = rawPayload.trim();
         
         if ((processedPayload.startsWith("(") || processedPayload.startsWith("[") || processedPayload.startsWith("{")) && 
@@ -102,6 +121,35 @@ public class WeatherStation {
             processedPayload = processedPayload.replace(",", "|");
         } else if (processedPayload.contains("#")) {
             processedPayload = processedPayload.replace("#", "|");
+        }
+
+        // Validate if the Microcontroller is registered
+        try {
+            String[] parts = processedPayload.split("\\|");
+            if (parts.length > 0) {
+                // Extract ID (remove non-numeric prefix if present, e.g., "A1" -> "1")
+                String idString = parts[0];
+                
+                if (!idString.isEmpty()) {
+                    int id = Integer.parseInt(idString);
+                    MicrocontrollerEntity mc = microcontrollerDAO.getMicrocontroller(id);
+
+                    if (mc == null) {
+                        System.out.println("   [ACCESS DENIED] Ignored data from unregistered Microcontroller ID: " + id);
+                        return; // Stop processing this message
+                    }
+
+                    // Validation removed as per request. Only ID existence is checked.
+                    // System.out.println("   [DEBUG] Validated ID: " + id);
+
+                } else {
+                    System.out.println("   [INVALID] Could not parse ID from payload: " + parts[0]);
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("   [ERROR] Malformed payload during validation: " + e.getMessage());
+            return;
         }
 
         System.out.println("   Processed Payload: " + processedPayload);
