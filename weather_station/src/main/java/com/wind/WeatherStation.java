@@ -149,12 +149,9 @@ public class WeatherStation {
                     }
                 } else {
                     System.out.println("   [UNKNOWN KEY] No key found for ID " + id + ". Is handshake done?");
-                    // Fallback: maybe it's not encrypted? Or just drop it.
-                    // For now, let's assume if it looks like ID|Data it might be unencrypted legacy, 
-                    // but if we enforce encryption, we should drop or log warning.
                 }
             } catch (NumberFormatException e) {
-                // Not an ID|Encrypted format, maybe legacy raw format
+                //
             }
         }
 
