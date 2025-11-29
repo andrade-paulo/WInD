@@ -1,25 +1,39 @@
 package com.wind;
 
-import org.eclipse.paho.client.mqttv3.IMqttClient;
-import org.eclipse.paho.client.mqttv3.MqttClient;
-import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
-import org.eclipse.paho.client.mqttv3.MqttException;
-import org.eclipse.paho.client.mqttv3.MqttMessage;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.io.IOException;
 
 import java.util.Date;
 import java.util.Locale;
 import java.util.Random;
 import java.util.Scanner;
 import java.util.concurrent.TimeUnit;
-import java.util.UUID;
+import java.security.PublicKey;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
 
+import com.wind.security.RSA;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import javax.crypto.spec.SecretKeySpec;
+import java.util.Base64;
+import com.wind.security.AES;
 
 public class Microcontroller {
 
     private final int id;
     private final String location;
-    private final String brokerUrl;
-    private final String topic;
+    private final String serverHost;
+    private final int serverPort;
+    private final int localPort; // New field for the local binding port
 
     private final Character prefix;
     private final Character suffix;
@@ -27,28 +41,39 @@ public class Microcontroller {
 
     private volatile boolean isRunning = true;
     private final Random random;
-    private IMqttClient mqttClient;
+    private DatagramSocket socket;
+    private SecretKey aesKey;
+    private final HttpClient httpClient;
+    private static final String KEY_FILE_PREFIX = "mc_key_";
 
-    private static final int RECONNECT_DELAY_MS = 5000;
-
-    public Microcontroller(int id, String location, String brokerHost, int brokerPort, Character prefix, Character suffix, Character separator) {
+    public Microcontroller(int id, String location, String serverHost, int serverPort, int localPort, Character prefix, Character suffix, Character separator) {
         this.id = id;
         // Valida a localização para garantir que seja uma das opções esperadas
         this.location = location;
-        this.brokerUrl = String.format("tcp://%s:%d", brokerHost, brokerPort);
-        this.topic = String.format("raw/data/%s/%d", this.location, this.id);
+        this.serverHost = serverHost;
+        this.serverPort = serverPort;
+        this.localPort = localPort;
         
         this.prefix = prefix != null ? prefix : '\0';
         this.suffix = suffix != null ? suffix : '\0';
         this.separator = separator != null ? separator : ';';
 
         this.random = new Random();
+        this.httpClient = HttpClient.newHttpClient();
     }
 
     public static void main(String[] args) {
-        System.out.println("WInD - Microcontroller Simulation (MQTT Version)");
+        System.out.println("WInD - Microcontroller Simulation (UDP Version)");
 
         try (Scanner scanner = new Scanner(System.in)) {
+            // Print it's own IP address
+            try {
+                InetAddress localAddress = InetAddress.getLocalHost();
+                System.out.println("Local IP Address: " + localAddress.getHostAddress());
+            } catch (IOException e) {
+                System.err.println("Error retrieving local IP address: " + e.getMessage());
+            }
+
             System.out.print("ID: ");
             int id = scanner.nextInt();
             scanner.nextLine(); // Consume newline
@@ -67,31 +92,39 @@ public class Microcontroller {
 
             // Prefixo, Sufixo e Separador
             System.out.print("Prefix (optional): ");
-            Character prefix = scanner.nextLine().charAt(0);
+            String prefixInput = scanner.nextLine();
+            Character prefix = prefixInput.isEmpty() ? null : prefixInput.charAt(0);
+            
             System.out.print("Suffix (optional): ");
-            Character suffix = scanner.nextLine().charAt(0);
+            String suffixInput = scanner.nextLine();
+            Character suffix = suffixInput.isEmpty() ? null : suffixInput.charAt(0);
+            
             System.out.print("Separator (default ';'): ");
-            Character separator = scanner.nextLine().charAt(0);
+            String separatorInput = scanner.nextLine();
+            Character separator = separatorInput.isEmpty() ? null : separatorInput.charAt(0);
 
-            // Broker Configuration
-            System.out.print("Broker Host (default: localhost): ");
-            String brokerHost = scanner.nextLine().trim();
-            if (brokerHost.isEmpty()) {
-                brokerHost = "localhost";
+            // Server Configuration
+            System.out.print("Server Host (default: localhost): ");
+            String serverHost = scanner.nextLine().trim();
+            if (serverHost.isEmpty()) {
+                serverHost = "localhost";
             }
 
-            System.out.print("Broker Port (default: 1883): ");
+            System.out.print("Server Port (default: 9876): ");
             String portStr = scanner.nextLine().trim();
-            int brokerPort = portStr.isEmpty() ? 1883 : Integer.parseInt(portStr);
+            int serverPort = portStr.isEmpty() ? 9876 : Integer.parseInt(portStr);
+
+            // Local Port Configuration removed - using random port
+            int localPort = 0;
 
             System.out.println("===================================================");
             System.out.println("        Microcontroller Simulation Starting");
-            System.out.println("  Targeting Broker at " + brokerHost + ":" + brokerPort);
-            System.out.println("  Publishing to Topic: raw/data/" + location + "/" + id);
+            System.out.println("  Targeting UDP Server at " + serverHost + ":" + serverPort);
+            System.out.println("  Binding to Random Local Port");
             System.out.println("===================================================");
 
-            Microcontroller mc = new Microcontroller(id, location, brokerHost, brokerPort, prefix, suffix, separator);
-            Thread mcThread = new Thread(mc::startSendingData, "MQTT-MC-" + id);
+            Microcontroller mc = new Microcontroller(id, location, serverHost, serverPort, localPort, prefix, suffix, separator);
+            Thread mcThread = new Thread(mc::start, "UDP-MC-" + id);
             mcThread.start();
 
             // Shutdown hook para garantir desconexão limpa
@@ -110,93 +143,136 @@ public class Microcontroller {
         }
     }
 
-    private boolean connect() {
-        if (mqttClient != null && mqttClient.isConnected()) {
-            return true;
-        }
+    public void start() {
         try {
-            // Gera um Client ID único para evitar conflitos no broker
-            String clientId = "wind-mc-" + id + "-" + UUID.randomUUID().toString().substring(0, 8);
-            mqttClient = new MqttClient(brokerUrl, clientId);
+            // Perform Handshake
+            performHandshake();
 
-            MqttConnectOptions options = new MqttConnectOptions();
-            options.setAutomaticReconnect(true); // Deixa a biblioteca Paho cuidar da reconexão
-            options.setCleanSession(true);
-            options.setConnectionTimeout(10); // Timeout de 10 segundos
+            socket = new DatagramSocket(localPort);
+            System.out.println("Microcontroller " + id + " started on port " + socket.getLocalPort());
+            System.out.println("Sending data to " + serverHost + ":" + serverPort);
 
-            System.out.println("[" + new Date() + " MC-" + id + "] Attempting to connect to MQTT broker at " + brokerUrl + "...");
-            mqttClient.connect(options);
-            System.out.println("[" + new Date() + " MC-" + id + "] Successfully connected to MQTT broker.");
-            return true;
-
-        } catch (MqttException e) {
-            System.err.println("[" + new Date() + " MC-" + id + "] Error connecting to MQTT broker: " + e.getMessage());
-            return false;
-        }
-    }
-
-    private void disconnect() {
-        if (mqttClient != null && mqttClient.isConnected()) {
-            try {
-                System.out.println("[" + new Date() + " MC-" + id + "] Disconnecting from MQTT broker...");
-                mqttClient.disconnect();
-                mqttClient.close();
-                System.out.println("[" + new Date() + " MC-" + id + "] Disconnected.");
-            } catch (MqttException e) {
-                System.err.println("[" + new Date() + " MC-" + id + "] Error while disconnecting: " + e.getMessage());
+            while (isRunning) {
+                sendData();
+                // Wait for 2 seconds before sending next data
+                TimeUnit.SECONDS.sleep(2);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        } finally {
+            if (socket != null && !socket.isClosed()) {
+                socket.close();
             }
         }
     }
 
-    public void startSendingData() {
-        if (!connect()) {
-            // Se a primeira conexão falhar, o loop principal tentará reconectar
-            System.err.println("[" + new Date() + " MC-" + id + "] Initial connection failed. Will retry in background.");
+    private void saveKey(SecretKey key) {
+        try (FileOutputStream fos = new FileOutputStream(KEY_FILE_PREFIX + id + ".dat")) {
+            fos.write(key.getEncoded());
+        } catch (IOException e) {
+            System.err.println("Error saving key: " + e.getMessage());
         }
+    }
 
-        while (isRunning && !Thread.currentThread().isInterrupted()) {
-            if (mqttClient == null || !mqttClient.isConnected()) {
-                 System.err.println("[" + new Date() + " MC-" + id + "] Connection lost. Paho will attempt to reconnect automatically. Waiting...");
-                try {
-                    // Espera um pouco para a reconexão automática funcionar
-                    TimeUnit.MILLISECONDS.sleep(RECONNECT_DELAY_MS);
-                    continue; // Volta para o início do loop e checa a conexão novamente
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-
-            // Gera dados climáticos aleatórios
-            float pressure = 950.0f + random.nextFloat() * (1050.0f - 950.0f);
-            float radiation = random.nextFloat() * 1400.0f;
-            float temperature = 253.15f + random.nextFloat() * (323.15f - 253.15f);
-            float humidity = random.nextFloat() * 100.0f;
-
-            String dataString = String.format(Locale.US, "%c%d%c%s%c%.2f%c%.2f%c%.2f%c%.2f%c",
-                this.prefix, this.id, this.separator, location, this.separator, pressure, this.separator, radiation, this.separator, temperature, this.separator, humidity, this.suffix);
-
-            MqttMessage message = new MqttMessage(dataString.getBytes());
-            message.setQos(1); // Qualidade de Serviço 1: "pelo menos uma vez"
-
-            try {
-                mqttClient.publish(this.topic, message);
-                System.out.println("[" + new Date() + " MC-" + id + "] Published to topic '" + this.topic + "': " + dataString);
-
-            } catch (MqttException e) {
-                System.err.println("[" + new Date() + " MC-" + id + "] Error publishing message: " + e.getMessage());
-            }
-            
-            int sleepTimeMs = 2000 + random.nextInt(3001); // 2 a 5 segundos
-            try {
-                TimeUnit.MILLISECONDS.sleep(sleepTimeMs);
-            } catch (InterruptedException e) {
-                System.out.println("[" + new Date() + " MC-" + id + "] Send loop interrupted.");
-                isRunning = false; // Sinaliza para sair do loop
-                Thread.currentThread().interrupt(); // Preserva o status de interrupção
+    private boolean loadKey() {
+        File keyFile = new File(KEY_FILE_PREFIX + id + ".dat");
+        if (keyFile.exists()) {
+            try (FileInputStream fis = new FileInputStream(keyFile)) {
+                byte[] keyBytes = fis.readAllBytes();
+                this.aesKey = new SecretKeySpec(keyBytes, "AES");
+                return true;
+            } catch (IOException e) {
+                System.err.println("Error loading key: " + e.getMessage());
             }
         }
-        disconnect();
-        System.out.println("[" + new Date() + " MC-" + id + "] Stopped sending data.");
+        return false;
+    }
+
+    private void performHandshake() throws Exception {
+        // Assuming the gateway is at http://localhost:8000 for simplicity in this simulation
+        // In a real scenario, this URL should be configurable
+        // Updated to point to Weather Station Management Port (9090)
+        String gatewayUrl = "http://localhost:9090";
+
+        // 1. Get Server Public Key
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(gatewayUrl + "/security/public-key"))
+                .GET()
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        
+        if (response.statusCode() != 200) {
+            throw new Exception("Failed to retrieve public key");
+        }
+        
+        PublicKey serverPublicKey = RSA.getPublicKeyFromBase64(response.body());
+
+        // 2. Load or Generate AES Key
+        boolean keyLoaded = loadKey();
+        if (!keyLoaded) {
+            KeyGenerator keyGen = KeyGenerator.getInstance("AES");
+            keyGen.init(256);
+            aesKey = keyGen.generateKey();
+        } else {
+            System.out.println("Loaded existing AES key for ID " + id);
+        }
+
+        // 3. Encrypt AES Key with RSA
+        String encryptedAesKey = RSA.encrypt(aesKey.getEncoded(), serverPublicKey);
+
+        // 4. Send Encrypted AES Key to Server
+        // Include ID in the query parameter
+        request = HttpRequest.newBuilder()
+                .uri(URI.create(gatewayUrl + "/security/handshake?mcId=" + id))
+                .POST(HttpRequest.BodyPublishers.ofString(encryptedAesKey))
+                .build();
+        
+        response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        
+        if (response.statusCode() == 409) {
+            if (keyLoaded) {
+                System.out.println("Server already has key for ID " + id + ". Proceeding with loaded key.");
+            } else {
+                System.err.println("Erro: ID " + id + " já registrado no servidor. Handshake recusado.");
+                // In a real scenario, we might want to load a persisted key here
+                throw new Exception("Microcontroller ID already registered");
+            }
+        } else if (response.statusCode() != 200) {
+            throw new Exception("Handshake failed with status: " + response.statusCode());
+        } else {
+            // If 200 OK and we generated a new key, save it
+            if (!keyLoaded) {
+                saveKey(aesKey);
+                System.out.println("New key generated and saved.");
+            }
+            System.out.println("Handshake de segurança realizado com sucesso.");
+        }
+    }
+
+    private void sendData() throws IOException {
+        // Gera dados climáticos aleatórios
+        float pressure = 950.0f + random.nextFloat() * (1050.0f - 950.0f);
+        float radiation = random.nextFloat() * 1400.0f;
+        float temperature = 253.15f + random.nextFloat() * (323.15f - 253.15f);
+        float humidity = random.nextFloat() * 100.0f;
+
+        String dataString = String.format(Locale.US, "%c%d%c%s%c%.2f%c%.2f%c%.2f%c%.2f%c",
+            this.prefix, this.id, this.separator, location, this.separator, pressure, this.separator, radiation, this.separator, temperature, this.separator, humidity, this.suffix);
+
+        // Encrypt Payload
+        AES aes = new AES(aesKey);
+        byte[] encryptedBytes = aes.encrypt(dataString.getBytes());
+        String encryptedBase64 = Base64.getEncoder().encodeToString(encryptedBytes);
+        
+        // Format: ID|EncryptedData
+        String payload = id + "|" + encryptedBase64;
+
+        byte[] buffer = payload.getBytes();
+        InetAddress address = InetAddress.getByName(serverHost);
+        DatagramPacket packet = new DatagramPacket(buffer, buffer.length, address, serverPort);
+
+        socket.send(packet);
+        System.out.println("[" + new Date() + " MC-" + id + "] Sent UDP packet to " + serverHost + ":" + serverPort + " (from port " + socket.getLocalPort() + ") : " + payload);
     }
 
     public void stopSendingData() {

@@ -1,9 +1,7 @@
 package com.wind.datastructures;
 
 import java.io.Serializable;
-import java.util.ArrayList;
 import java.util.Iterator;
-import java.util.List;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -253,21 +251,6 @@ public class Hash<T> implements Serializable, Iterable<T> {
         }
     }
 
-    public List<T> getAll() {
-        lock.lock();
-        try {
-            List<T> list = new ArrayList<>();
-            for (int i = 0; i < tamanho; i++) {
-                if (tabela[i] != null) {
-                    list.add(tabela[i].valor);
-                }
-            }
-            return list;
-        } finally {
-            lock.unlock();
-        }
-    }
-
     public String toString() {
         lock.lock();
         try {
@@ -296,26 +279,28 @@ public class Hash<T> implements Serializable, Iterable<T> {
     @Override
     public Iterator<T> iterator() {
         return new Iterator<T>() {
-            private int i = 0;
+            private int index = 0;
+            private int count = 0;
 
             @Override
             public boolean hasNext() {
-                return i < ocupacao;
+                return count < ocupacao;
             }
 
             @Override
             public T next() {
                 lock.lock();
                 try {
-                    while (tabela[i] == null && i < tamanho) {
-                        i++;
+                    while (index < tamanho && tabela[index] == null) {
+                        index++;
                     }
 
-                    if (i >= tamanho) {
+                    if (index >= tamanho) {
                         return null;
                     }
 
-                    return tabela[i++].valor;
+                    count++;
+                    return tabela[index++].valor;
                 } finally {
                     lock.unlock();
                 }

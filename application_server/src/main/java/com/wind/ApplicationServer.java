@@ -7,17 +7,25 @@ import com.rabbitmq.client.DeliverCallback;
 
 import com.wind.entities.MicrocontrollerEntity;
 import com.wind.entities.WeatherData;
+import com.wind.entities.ClientEntity;
 import com.wind.model.DAO.LogDAO;
 import com.wind.model.DAO.WeatherDataDAO;
+import com.wind.model.DAO.ClientDAO;
 import com.wind.service.ServiceInstancePayload;
 import com.wind.service.ServiceRegistrar;
+import com.wind.security.RSA;
 
 import io.javalin.Javalin;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.util.Date;
 import java.util.concurrent.TimeoutException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ApplicationServer {
 
@@ -29,6 +37,7 @@ public class ApplicationServer {
 
     // Restaurando os DAOs conforme o projeto original
     private static final WeatherDataDAO weatherDataDAO = new WeatherDataDAO();
+    private static final ClientDAO clientDAO = new ClientDAO();
     @SuppressWarnings("unused")
     private static final LogDAO logDAO = new LogDAO();
 
@@ -38,7 +47,22 @@ public class ApplicationServer {
     private static final String RABBITMQ_PASS = "windpass";
     private static final String RABBITMQ_EXCHANGE_NAME = "wind_events_exchange";
 
+    private static PrivateKey privateKey;
+    private static PublicKey publicKey;
+    // Map to store AES keys for each session/client (simplified for this context)
+    // In a real scenario, this should be associated with a session token
+    private static final Map<String, byte[]> sessionKeys = new ConcurrentHashMap<>();
+
     public static void main(String[] args) {
+        try {
+            KeyPair keyPair = RSA.generateKeyPair();
+            privateKey = keyPair.getPrivate();
+            publicKey = keyPair.getPublic();
+        } catch (Exception e) {
+            System.err.println("Erro ao gerar par de chaves RSA: " + e.getMessage());
+            System.exit(1);
+        }
+
         Javalin app = Javalin.create().start("0.0.0.0", HTTP_PORT);
         System.out.println("Application Server (HTTP) iniciado na porta " + HTTP_PORT);
 
@@ -53,6 +77,48 @@ public class ApplicationServer {
         }
 
         app.get("/health", ctx -> ctx.status(200).result("OK"));
+
+        app.get("/app/security/public-key", ctx -> {
+            ctx.result(RSA.publicKeyToBase64(publicKey));
+        });
+
+        app.post("/app/security/handshake", ctx -> {
+            String encryptedAesKey = ctx.body();
+            
+            try {
+                byte[] aesKey = RSA.decrypt(encryptedAesKey, privateKey);
+                
+                // Client/EngClient Handshake (Session based)
+                String sessionId = ctx.ip(); 
+                sessionKeys.put(sessionId, aesKey);
+                LogDAO.addLog("[HANDSHAKE] Handshake realizado com sucesso para " + sessionId);
+                
+                ctx.status(200).result("Handshake successful");
+            } catch (Exception e) {
+                LogDAO.addLog("[HANDSHAKE ERROR] Falha no handshake: " + e.getMessage());
+                ctx.status(500).result("Handshake failed");
+            }
+        });
+
+        app.post("/app/auth/login", ctx -> {
+            ClientEntity credentials = ctx.bodyAsClass(ClientEntity.class);
+            ClientEntity client = clientDAO.authenticate(credentials.getUsername(), credentials.getPassword());
+            if (client != null) {
+                ctx.status(200).json(client);
+            } else {
+                ctx.status(401).result("Credenciais inválidas");
+            }
+        });
+
+        app.post("/app/auth/register", ctx -> {
+            ClientEntity credentials = ctx.bodyAsClass(ClientEntity.class);
+            if (clientDAO.exists(credentials.getUsername())) {
+                ctx.status(409).result("Usuário já existe");
+            } else {
+                clientDAO.addClient(credentials);
+                ctx.status(201).result("Usuário criado com sucesso");
+            }
+        });
 
         app.get("/app/weather", ctx -> {
             LogDAO.addLog("[HTTP_REQUEST] Recebida requisição para SELECT ALL.");

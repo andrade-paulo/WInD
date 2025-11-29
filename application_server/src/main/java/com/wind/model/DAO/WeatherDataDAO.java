@@ -1,26 +1,35 @@
 package com.wind.model.DAO;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.wind.datastructures.Hash;
 import com.wind.entities.WeatherData;
 import com.wind.entities.MicrocontrollerEntity;
-
+import com.wind.security.AES;
+import com.wind.security.KeyStoreManager;
 
 public class WeatherDataDAO {
     private Hash<WeatherData> weatherDataHash;
     private int ocupacao;
+    private AES aes;
 
     //private final String ARQUIVO = "database/database.dat";
     private final String ARQUIVO = "/app/database/database.dat";
     private final int TAMANHO_INICIAL = 100; 
     
     public WeatherDataDAO() {
+        KeyStoreManager keyStoreManager = new KeyStoreManager();
+        this.aes = new AES(keyStoreManager.getSecretKey());
+        
         weatherDataHash = new Hash<>(TAMANHO_INICIAL);
         loadDiskDatabase();
         ocupacao = weatherDataHash.getOcupacao();
@@ -30,13 +39,21 @@ public class WeatherDataDAO {
     public WeatherData[] selectAll() {
         LogDAO.addLog("[DB SELECT] Selecionando todas as informações climáticas");
 
-        return weatherDataHash.getAllWeatherData();
+        List<WeatherData> list = weatherDataHash.getAll();
+        return list.toArray(new WeatherData[0]);
     }
 
 
     public WeatherData[] selectByMicrocontroller(MicrocontrollerEntity microcontroller) {
         LogDAO.addLog("[DB SELECT] Selecionando informações climáticas do microcontrolador " + microcontroller.getId());
-        return weatherDataHash.getWeatherByMicrocontroller(microcontroller);
+        List<WeatherData> all = weatherDataHash.getAll();
+        List<WeatherData> filtered = new ArrayList<>();
+        for (WeatherData wd : all) {
+             if (wd.getMicrocontroller() != null && wd.getMicrocontroller().equals(microcontroller)) {
+                 filtered.add(wd);
+             }
+        }
+        return filtered.toArray(new WeatherData[0]);
     }
 
 
@@ -97,10 +114,15 @@ public class WeatherDataDAO {
 
     private void updateArquivo() {
         try {
-            FileOutputStream file = new FileOutputStream(ARQUIVO);
-            ObjectOutputStream out = new ObjectOutputStream(file);
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ObjectOutputStream out = new ObjectOutputStream(baos);
             out.writeObject(weatherDataHash);
             out.close();
+            
+            byte[] encryptedData = aes.encrypt(baos.toByteArray());
+            
+            FileOutputStream file = new FileOutputStream(ARQUIVO);
+            file.write(encryptedData);
             file.close();
         } catch (IOException e) {
             e.printStackTrace();
@@ -117,10 +139,22 @@ public class WeatherDataDAO {
                 file.createNewFile();
             } else {
                 FileInputStream fileIn = new FileInputStream(ARQUIVO);
-                ObjectInputStream objectIn = new ObjectInputStream(fileIn);
-                weatherDataHash = (Hash<WeatherData>) objectIn.readObject();
-                objectIn.close();
+                byte[] fileContent = fileIn.readAllBytes();
                 fileIn.close();
+                
+                if (fileContent.length > 0) {
+                    byte[] decryptedData = aes.decrypt(fileContent);
+                    if (decryptedData != null) {
+                        ByteArrayInputStream bais = new ByteArrayInputStream(decryptedData);
+                        ObjectInputStream objectIn = new ObjectInputStream(bais);
+                        weatherDataHash = (Hash<WeatherData>) objectIn.readObject();
+                        objectIn.close();
+                    } else {
+                        // Fallback or error handling if decryption fails (e.g. wrong key or corrupted file)
+                        System.err.println("Falha ao descriptografar o banco de dados de clima.");
+                        weatherDataHash = new Hash<>(TAMANHO_INICIAL);
+                    }
+                }
             }
         } catch (IOException e) {
             // Se o arquivo estiver vazio, criar uma nova HashTable

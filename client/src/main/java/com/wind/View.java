@@ -6,6 +6,44 @@ import com.wind.entities.WeatherData;
 public class View {
     public View() {}
 
+    public static void showLoginMenu() {
+        clearScreen();
+        System.out.println(Color.CYAN + "Autenticação" + Color.RESET);
+        System.out.print("Usuário: ");
+        String username = Client.scanner.nextLine();
+        System.out.print("Senha: ");
+        String password = Client.scanner.nextLine();
+
+        try {
+            if (Controller.login(username, password)) {
+                System.out.println(Color.GREEN + "Login realizado com sucesso!" + Color.RESET);
+                Thread.sleep(1000);
+                showMenu();
+            } else {
+                System.out.println(Color.YELLOW + "Usuário não encontrado ou senha incorreta." + Color.RESET);
+                System.out.print("Deseja criar uma nova conta? (s/n): ");
+                String response = Client.scanner.nextLine();
+                if (response.equalsIgnoreCase("s")) {
+                    if (Controller.register(username, password)) {
+                        System.out.println(Color.GREEN + "Conta criada com sucesso! Realizando login..." + Color.RESET);
+                        Thread.sleep(1000);
+                        showMenu();
+                    } else {
+                        System.out.println(Color.RED + "Erro ao criar conta. Tente novamente." + Color.RESET);
+                        Thread.sleep(2000);
+                        showLoginMenu();
+                    }
+                } else {
+                    showLoginMenu();
+                }
+            }
+        } catch (Exception e) {
+            System.out.println(Color.RED + "Erro na autenticação: " + e.getMessage() + Color.RESET);
+            try { Thread.sleep(2000); } catch (InterruptedException ie) {}
+            showLoginMenu();
+        }
+    }
+
     public static void showMenu() {
         clearScreen();
         String escolha;
@@ -127,8 +165,8 @@ public class View {
         }
     }
 
-    public static void clearScreen() {
+    private static void clearScreen() {
         System.out.print("\033[H\033[2J");
-        System.out.flush(); 
+        System.out.flush();
     }
 }

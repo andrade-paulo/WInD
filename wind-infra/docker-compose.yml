@@ -1,28 +1,4 @@
 services:
-  wind-ingress-broker:
-    image: eclipse-mosquitto:2.0
-    container_name: wind-ingress-broker
-    restart: unless-stopped
-    ports:
-      - "1883:1883"
-      - "9001:9001"
-    volumes:
-      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - wind_ingress_data:/mosquitto/data
-      - wind_ingress_log:/mosquitto/log
-
-  wind-egress-broker:
-    image: eclipse-mosquitto:2.0
-    container_name: wind-egress-broker
-    restart: unless-stopped
-    ports:
-      - "1884:1883"
-      - "9002:9001"
-    volumes:
-      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf
-      - wind_egress_data:/mosquitto/data
-      - wind_egress_log:/mosquitto/log
-
   wind-internal-bus:
     image: rabbitmq:3.12-management
     container_name: wind-internal-bus
@@ -53,6 +29,8 @@ services:
       - "7000:7000"
     networks:
       - wind_network
+    environment:
+      - SERVICE_DISCOVERY_URL=http://service-discovery:7000
     restart: on-failure
     healthcheck:
       # Comando que o Docker executará para verificar a saúde do serviço.
@@ -69,8 +47,12 @@ services:
       dockerfile: Dockerfile
       target: api-gateway
     container_name: api-gateway
+    ports:
+      - "8000:8000"
     networks:
       - wind_network
+    environment:
+      - SERVICE_DISCOVERY_URL=http://service-discovery:7000
     restart: on-failure
     depends_on:
       # Espera o service-discovery ficar "saudável".
@@ -87,6 +69,31 @@ services:
       - wind_network
     volumes:
       - ./database_backup:/app/database
+    depends_on:
+      wind-internal-bus:
+        condition: service_healthy
+      service-discovery:
+        condition: service_healthy
+    restart: on-failure
+
+  weather-station:
+    build:
+      context: ../
+      dockerfile: Dockerfile
+      target: weather-station
+    container_name: weather-station
+    networks:
+      - wind_network
+    ports:
+      - "9876:9876/udp"
+      - "9090:9090"
+    environment:
+      - RABBITMQ_HOST=wind-internal-bus
+      - SERVICE_DISCOVERY_URL=http://service-discovery:7000
+      - EGRESS_HOST=host.docker.internal
+      - EGRESS_PORT=9877
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       wind-internal-bus:
         condition: service_healthy
@@ -112,8 +119,4 @@ networks:
     driver: bridge
 
 volumes:
-  wind_ingress_data:
-  wind_ingress_log:
-  wind_egress_data:
-  wind_egress_log:
   wind_rabbitmq_data:

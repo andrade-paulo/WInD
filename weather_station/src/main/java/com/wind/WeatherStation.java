@@ -1,39 +1,58 @@
 package com.wind; 
 
-import com.rabbitmq.client.Channel;
-import com.rabbitmq.client.Connection;
-import com.rabbitmq.client.ConnectionFactory;
-import org.eclipse.paho.client.mqttv3.*;
-import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import com.wind.entities.MicrocontrollerEntity;
+import com.wind.model.DAO.MicrocontrollerDAO;
+import com.wind.service.ManagementService;
+import com.wind.service.RabbitMQService;
+import com.wind.service.ServiceDiscoveryService;
+import com.wind.service.UdpService;
+import com.wind.security.RSA;
+import com.wind.security.AES;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.net.InetSocketAddress;
 import java.util.UUID;
-import java.util.concurrent.TimeoutException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 
 public class WeatherStation {
 
-    // Configuração dos Brokers
-    private static final String INGRESS_BROKER_URL = "tcp://localhost:1883";
-    private static final String INGRESS_CLIENT_ID = "wind-gateway-ingress-subscriber-" + UUID.randomUUID();
-    private static final String INGRESS_TOPIC = "raw/data/#";
+    // Configuração dos Brokers / UDP
+    private static final int INGRESS_PORT = Integer.parseInt(System.getenv().getOrDefault("INGRESS_PORT", "9876"));
+    
+    private static final String EGRESS_HOST = System.getenv().getOrDefault("EGRESS_HOST", "localhost");
+    private static final int EGRESS_PORT = Integer.parseInt(System.getenv().getOrDefault("EGRESS_PORT", "9877"));
 
-    private static final String EGRESS_BROKER_URL = "tcp://localhost:1884";
-    private static final String EGRESS_CLIENT_ID = "wind-gateway-egress-publisher-" + UUID.randomUUID();
-
-    private static final String RABBITMQ_HOST = "localhost";
-    private static final String RABBITMQ_USER = "winduser";
-    private static final String RABBITMQ_PASS = "windpass";
+    private static final String RABBITMQ_HOST = System.getenv().getOrDefault("RABBITMQ_HOST", "localhost");
+    private static final String RABBITMQ_USER = System.getenv().getOrDefault("RABBITMQ_USER", "winduser");
+    private static final String RABBITMQ_PASS = System.getenv().getOrDefault("RABBITMQ_PASS", "windpass");
     private static final String RABBITMQ_EXCHANGE_NAME = "wind_events_exchange";
 
-    // Conexões
-    private IMqttClient ingressClient;
-    private IMqttClient egressClient;
-    private Connection rabbitConnection;
-    private Channel rabbitChannel;
+    // Service Discovery
+    private static final String SERVICE_DISCOVERY_URL = System.getenv().getOrDefault("SERVICE_DISCOVERY_URL", "http://localhost:7000");
+    private static final String SERVICE_NAME = "weather-station";
+    private static final String INSTANCE_ID = "weather-station-" + UUID.randomUUID();
+    private static final String SERVICE_ADDRESS = EGRESS_HOST + ":" + EGRESS_PORT;
+
+    // Management
+    private static final int MANAGEMENT_PORT = Integer.parseInt(System.getenv().getOrDefault("MANAGEMENT_PORT", "9090"));
+
+    private ServiceDiscoveryService serviceDiscoveryService;
+    private RabbitMQService rabbitMQService;
+    private UdpService udpService;
+    private ManagementService managementService;
+    private MicrocontrollerDAO microcontrollerDAO;
+    
+    private PrivateKey privateKey;
+    private PublicKey publicKey;
+    private final Map<Integer, byte[]> microcontrollerKeys = new ConcurrentHashMap<>();
 
     public static void main(String[] args) {
-        System.out.println("WInD - WeatherStation Service");
+        System.out.println("WInD - WeatherStation Service (UDP Version)");
         System.out.println("======================");
 
         WeatherStation gateway = new WeatherStation();
@@ -48,16 +67,37 @@ public class WeatherStation {
 
     public void start() {
         try {
+            // Initialize Security Keys
+            KeyPair keyPair = RSA.generateKeyPair();
+            this.privateKey = keyPair.getPrivate();
+            this.publicKey = keyPair.getPublic();
+
+            // Initialize DAO
+            this.microcontrollerDAO = new MicrocontrollerDAO();
+
+            // Initialize Services
+            this.serviceDiscoveryService = new ServiceDiscoveryService(SERVICE_DISCOVERY_URL, SERVICE_NAME, INSTANCE_ID, SERVICE_ADDRESS);
+            this.rabbitMQService = new RabbitMQService(RABBITMQ_HOST, RABBITMQ_USER, RABBITMQ_PASS, RABBITMQ_EXCHANGE_NAME);
+            this.udpService = new UdpService(INGRESS_PORT, EGRESS_HOST, EGRESS_PORT);
+            this.managementService = new ManagementService(MANAGEMENT_PORT, microcontrollerDAO, publicKey, privateKey, microcontrollerKeys);
+
             System.out.println("[INIT] Connecting to RabbitMQ (" + RABBITMQ_HOST + ")...");
-            connectRabbitMQ();
+            rabbitMQService.connect();
 
-            System.out.println("[INIT] Connecting to Egress MQTT Broker (" + EGRESS_BROKER_URL + ")...");
-            connectEgressMqtt();
+            System.out.println("[INIT] Setting up Egress UDP Socket (" + EGRESS_HOST + ":" + EGRESS_PORT + ")...");
+            udpService.setupEgress();
 
-            System.out.println("[INIT] Connecting to Ingress MQTT Broker (" + INGRESS_BROKER_URL + ")...");
-            connectIngressMqtt();
+            System.out.println("[INIT] Starting Ingress UDP Listener on port " + INGRESS_PORT + "...");
+            udpService.startIngressListener(this::processMessage);
 
-            System.out.println("\nWeatherStation is running and listening for messages. Press Ctrl+C to stop.");
+            System.out.println("[INIT] Starting Management Service on port " + MANAGEMENT_PORT + "...");
+            managementService.start();
+
+            System.out.println("[INIT] Registering with Service Discovery...");
+            serviceDiscoveryService.registerService();
+            serviceDiscoveryService.startHeartbeat();
+
+            System.out.println("\nWeatherStation is running and listening for UDP packets. Press Ctrl+C to stop.");
 
         } catch (Exception e) {
             System.err.println("WeatherStation failed to start: " + e.getMessage());
@@ -67,124 +107,112 @@ public class WeatherStation {
     }
 
     public void stop() {
-        try {
-            if (ingressClient != null && ingressClient.isConnected()) ingressClient.disconnect();
-        } catch (MqttException e) {
-            System.err.println("Error disconnecting from Ingress MQTT: " + e.getMessage());
+        if (serviceDiscoveryService != null) {
+            serviceDiscoveryService.deregisterService();
+            serviceDiscoveryService.stop();
         }
-        try {
-            if (egressClient != null && egressClient.isConnected()) egressClient.disconnect();
-        } catch (MqttException e) {
-            System.err.println("Error disconnecting from Egress MQTT: " + e.getMessage());
+        if (udpService != null) {
+            udpService.stop();
         }
-        try {
-            if (rabbitChannel != null && rabbitChannel.isOpen()) rabbitChannel.close();
-            if (rabbitConnection != null && rabbitConnection.isOpen()) rabbitConnection.close();
-        } catch (IOException | TimeoutException e) {
-            System.err.println("Error disconnecting from RabbitMQ: " + e.getMessage());
+        if (rabbitMQService != null) {
+            rabbitMQService.close();
+        }
+        if (managementService != null) {
+            managementService.stop();
         }
     }
 
-    private void connectRabbitMQ() throws IOException, TimeoutException {
-        ConnectionFactory factory = new ConnectionFactory();
-        factory.setHost(RABBITMQ_HOST);
-        factory.setUsername(RABBITMQ_USER);
-        factory.setPassword(RABBITMQ_PASS);
-        this.rabbitConnection = factory.newConnection();
-        this.rabbitChannel = rabbitConnection.createChannel();
-        this.rabbitChannel.exchangeDeclare(RABBITMQ_EXCHANGE_NAME, "fanout", true);
-        System.out.println("[RabbitMQ] Connected and exchange '" + RABBITMQ_EXCHANGE_NAME + "' is ready.");
-    }
-
-    private void connectEgressMqtt() throws MqttException {
-        this.egressClient = new MqttClient(EGRESS_BROKER_URL, EGRESS_CLIENT_ID, new MemoryPersistence());
-        MqttConnectOptions options = new MqttConnectOptions();
-        options.setAutomaticReconnect(true);
-        options.setCleanSession(true);
-        this.egressClient.connect(options);
-        System.out.println("[Egress MQTT] Connected.");
-    }
-
-    private void connectIngressMqtt() throws MqttException {
-        this.ingressClient = new MqttClient(INGRESS_BROKER_URL, INGRESS_CLIENT_ID, new MemoryPersistence());
+    private void processMessage(String rawPayload, InetSocketAddress sender) {
+        String processedPayload = rawPayload.trim();
         
-        this.ingressClient.setCallback(new MqttCallback() {
-            @Override
-            public void connectionLost(Throwable cause) {
-                System.err.println("[Ingress MQTT] Connection lost! Paho will attempt to reconnect. Cause: " + cause.getMessage());
-            }
-
-            @Override
-            public void messageArrived(String topic, MqttMessage message) throws Exception {
-                String rawPayload = new String(message.getPayload(), StandardCharsets.UTF_8);
-                System.out.println("\n-> [MSG RCV] From topic: " + topic);
-                System.out.println("   Payload: " + rawPayload);
+        // Try to parse ID and Encrypted Payload
+        // Format: ID|EncryptedBase64
+        String[] parts = processedPayload.split("\\|");
+        
+        if (parts.length == 2) {
+            try {
+                int id = Integer.parseInt(parts[0]);
+                String encryptedData = parts[1];
                 
-                String processedPayload = rawPayload.trim();
-                
-                if ((processedPayload.startsWith("(") || processedPayload.startsWith("[") || processedPayload.startsWith("{")) && 
-                    (processedPayload.endsWith(")") || processedPayload.endsWith("]") || processedPayload.endsWith("}"))) {
-                        processedPayload = processedPayload.substring(1, processedPayload.length() - 1).trim();
+                if (microcontrollerKeys.containsKey(id)) {
+                    byte[] keyBytes = microcontrollerKeys.get(id);
+                    SecretKey key = new SecretKeySpec(keyBytes, "AES");
+                    AES aes = new AES(key);
+                    
+                    String decrypted = aes.decrypt(encryptedData);
+                    if (decrypted != null) {
+                        processedPayload = decrypted.trim();
+                        System.out.println("   [DECRYPTED] Payload from ID " + id + ": " + processedPayload);
+                    } else {
+                        System.err.println("   [ERROR] Failed to decrypt payload from ID " + id);
+                        return;
+                    }
+                } else {
+                    System.out.println("   [UNKNOWN KEY] No key found for ID " + id + ". Is handshake done?");
+                    // Fallback: maybe it's not encrypted? Or just drop it.
+                    // For now, let's assume if it looks like ID|Data it might be unencrypted legacy, 
+                    // but if we enforce encryption, we should drop or log warning.
                 }
-
-                // Discover the separator used in the raw data
-                if (processedPayload.contains("-")) {
-                    processedPayload = processedPayload.replace("-", "|");
-                } else if (processedPayload.contains(";")) {
-                    processedPayload = processedPayload.replace(";", "|");
-                } else if (processedPayload.contains(",")) {
-                    processedPayload = processedPayload.replace(",", "|");
-                } else if (processedPayload.contains("#")) {
-                    processedPayload = processedPayload.replace("#", "|");
-                }
-
-                System.out.println("   Processed Payload: " + processedPayload);
-
-                String egressTopic = topic.replace("raw/data", "formatted/realtime");
-                publishToEgress(egressTopic, processedPayload);
-                
-                publishToRabbitMQ(processedPayload);
+            } catch (NumberFormatException e) {
+                // Not an ID|Encrypted format, maybe legacy raw format
             }
-
-            @Override
-            public void deliveryComplete(IMqttDeliveryToken token) {
-                // Não é usado neste subscriber
-            }
-        });
-
-        MqttConnectOptions options = new MqttConnectOptions();
-        options.setAutomaticReconnect(true);
-        options.setCleanSession(true);
-        this.ingressClient.connect(options);
-        this.ingressClient.subscribe(INGRESS_TOPIC, 1);
-        System.out.println("[Ingress MQTT] Connected and subscribed to topic '" + INGRESS_TOPIC + "'.");
-    }
-
-    private void publishToEgress(String topic, String payload) {
-        try {
-            if (egressClient != null && egressClient.isConnected()) {
-                MqttMessage message = new MqttMessage(payload.getBytes(StandardCharsets.UTF_8));
-                message.setQos(1);
-                egressClient.publish(topic, message);
-                System.out.println("<- [EGRESS] Published to MQTT topic: " + topic);
-            } else {
-                System.err.println("[EGRESS] Cannot publish, MQTT client not connected.");
-            }
-        } catch (MqttException e) {
-            System.err.println("[EGRESS] Error publishing to MQTT: " + e.getMessage());
         }
-    }
-    
-    private void publishToRabbitMQ(String payload) {
+
+        if ((processedPayload.startsWith("(") || processedPayload.startsWith("[") || processedPayload.startsWith("{")) && 
+            (processedPayload.endsWith(")") || processedPayload.endsWith("]") || processedPayload.endsWith("}"))) {
+                processedPayload = processedPayload.substring(1, processedPayload.length() - 1).trim();
+        }
+
+        // Discover the separator used in the raw data
+        if (processedPayload.contains("-")) {
+            processedPayload = processedPayload.replace("-", "|");
+        } else if (processedPayload.contains(";")) {
+            processedPayload = processedPayload.replace(";", "|");
+        } else if (processedPayload.contains(",")) {
+            processedPayload = processedPayload.replace(",", "|");
+        } else if (processedPayload.contains("#")) {
+            processedPayload = processedPayload.replace("#", "|");
+        }
+
+        // Validate if the Microcontroller is registered
         try {
-             if (rabbitChannel != null && rabbitChannel.isOpen()) {
-                rabbitChannel.basicPublish(RABBITMQ_EXCHANGE_NAME, "", null, payload.getBytes(StandardCharsets.UTF_8));
-                System.out.println("<- [RABBITMQ] Published to exchange: " + RABBITMQ_EXCHANGE_NAME);
-             } else {
-                 System.err.println("[RABBITMQ] Cannot publish, channel not available.");
-             }
-        } catch (IOException e) {
-             System.err.println("[RABBITMQ] Error publishing to RabbitMQ: " + e.getMessage());
+            parts = processedPayload.split("\\|");
+            if (parts.length > 0) {
+                // Extract ID (remove non-numeric prefix if present, e.g., "A1" -> "1")
+                String idString = parts[0];
+                
+                // Handle potential prefix in ID (e.g. "A1")
+                if (idString.matches(".*\\d.*")) {
+                     idString = idString.replaceAll("\\D+","");
+                }
+
+                if (!idString.isEmpty()) {
+                    int id = Integer.parseInt(idString);
+                    MicrocontrollerEntity mc = microcontrollerDAO.getMicrocontroller(id);
+
+                    if (mc == null) {
+                        System.out.println("   [ACCESS DENIED] Ignored data from unregistered Microcontroller ID: " + id);
+                        return; // Stop processing this message
+                    }
+                } else {
+                    System.out.println("   [INVALID] Could not parse ID from payload: " + parts[0]);
+                    return;
+                }
+            }
+        } catch (Exception e) {
+            System.err.println("   [ERROR] Malformed payload during validation: " + e.getMessage());
+            return;
+        }
+
+        System.out.println("   Processed Payload: " + processedPayload);
+
+        // In UDP we don't have topics, so we just forward the payload
+        if (udpService != null) {
+            udpService.send(processedPayload);
+        }
+        
+        if (rabbitMQService != null) {
+            rabbitMQService.publish(processedPayload);
         }
     }
 }
