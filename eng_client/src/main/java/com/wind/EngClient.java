@@ -53,9 +53,9 @@ public class EngClient {
 
     public void start() {
         try {
-            System.out.print("Insira a URL do API Gateway (ex: http://localhost:8000): ");
+            System.out.print("Insira a URL do Servidor (ex: http://localhost:80): ");
             String inputUrl = scanner.nextLine().trim();
-            this.gatewayUrl = inputUrl.isEmpty() ? "http://localhost:8000" : inputUrl;
+            this.gatewayUrl = inputUrl.isEmpty() ? "http://localhost:80" : inputUrl;
 
             if (!this.gatewayUrl.toLowerCase().startsWith("http://") && !this.gatewayUrl.toLowerCase().startsWith("https://")) {
                 this.gatewayUrl = "http://" + this.gatewayUrl;
@@ -63,7 +63,7 @@ public class EngClient {
 
             performHandshake();
 
-            System.out.println("[INIT] Requesting WeatherStation address from API Gateway...");
+            System.out.println("[INIT] Requesting WeatherStation address from Server...");
             String address = getServiceAddress(WEATHER_STATION_SERVICE_NAME);
             
             if (address == null) {
@@ -87,8 +87,8 @@ public class EngClient {
 
             int port = Integer.parseInt(parts[1]);
 
-            // Construct Management URL
-            this.weatherStationManagementUrl = "http://" + host + ":" + MANAGEMENT_PORT;
+            // Construct Management URL (via Gateway)
+            this.weatherStationManagementUrl = this.gatewayUrl + "/weather";
             System.out.println("[INIT] WeatherStation Management URL: " + this.weatherStationManagementUrl);
 
             System.out.println("[INIT] Starting UDP Listener on port " + port + "...");
@@ -249,6 +249,7 @@ public class EngClient {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(weatherStationManagementUrl + "/microcontrollers"))
+                    .header("X-API-Key", API_KEY)
                     .GET()
                     .build();
 
@@ -287,6 +288,7 @@ public class EngClient {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(weatherStationManagementUrl + "/microcontrollers"))
                     .header("Content-Type", "application/json")
+                    .header("X-API-Key", API_KEY)
                     .POST(HttpRequest.BodyPublishers.ofString(json))
                     .build();
 
@@ -311,6 +313,7 @@ public class EngClient {
 
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(weatherStationManagementUrl + "/microcontrollers/" + id))
+                    .header("X-API-Key", API_KEY)
                     .DELETE()
                     .build();
 

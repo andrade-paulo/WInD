@@ -18,11 +18,11 @@ public class Client {
                 "              Weather Information Distributor              \r\n" +
                 "===========================================================\r\n");
 
-        System.out.print("Insira a URL do API Gateway (padrão: http://localhost:8000): ");
+        System.out.print("Insira a URL do API Gateway (padrão: http://localhost:80): ");
         String gatewayUrl = scanner.nextLine();
 
         if (gatewayUrl.isBlank()) {
-            gatewayUrl = "http://localhost:8000";
+            gatewayUrl = "http://localhost:80";
         }
 
         if (!gatewayUrl.toLowerCase().startsWith("http://") && !gatewayUrl.toLowerCase().startsWith("https://")) {

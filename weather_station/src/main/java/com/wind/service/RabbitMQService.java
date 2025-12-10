@@ -30,10 +30,29 @@ public class RabbitMQService {
         factory.setHost(host);
         factory.setUsername(user);
         factory.setPassword(pass);
-        this.connection = factory.newConnection();
-        this.channel = connection.createChannel();
-        this.channel.exchangeDeclare(exchangeName, "fanout", true);
-        System.out.println("[RabbitMQ] Connected and exchange '" + exchangeName + "' is ready.");
+        
+        int maxRetries = 10;
+        for (int i = 0; i < maxRetries; i++) {
+            try {
+                this.connection = factory.newConnection();
+                this.channel = connection.createChannel();
+                this.channel.exchangeDeclare(exchangeName, "fanout", true);
+                System.out.println("[RabbitMQ] Connected and exchange '" + exchangeName + "' is ready.");
+                return;
+            } catch (IOException | TimeoutException e) {
+                System.err.println("[RabbitMQ] Connection failed (attempt " + (i + 1) + "/" + maxRetries + "): " + e.getMessage());
+                if (i < maxRetries - 1) {
+                    try {
+                        Thread.sleep(5000);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Interrupted while waiting to retry RabbitMQ connection", ie);
+                    }
+                } else {
+                    throw e;
+                }
+            }
+        }
     }
 
     public void publish(String payload) {

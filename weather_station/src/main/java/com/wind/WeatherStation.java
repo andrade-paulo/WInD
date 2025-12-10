@@ -36,7 +36,8 @@ public class WeatherStation {
     private static final String SERVICE_DISCOVERY_URL = System.getenv().getOrDefault("SERVICE_DISCOVERY_URL", "http://localhost:7000");
     private static final String SERVICE_NAME = "weather-station";
     private static final String INSTANCE_ID = "weather-station-" + UUID.randomUUID();
-    private static final String SERVICE_ADDRESS = EGRESS_HOST + ":" + EGRESS_PORT;
+    // Use internal docker address for management API discovery
+    private static final String SERVICE_ADDRESS = System.getenv().getOrDefault("MANAGEMENT_ADDRESS", "weather-station:9090");
 
     // Management
     private static final int MANAGEMENT_PORT = Integer.parseInt(System.getenv().getOrDefault("MANAGEMENT_PORT", "9090"));
