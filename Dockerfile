@@ -37,6 +37,7 @@ ENTRYPOINT ["java","-jar","/app/app.jar"]
 
 FROM eclipse-temurin:17-jre-jammy AS api-gateway
 WORKDIR /app
+RUN apt-get update && apt-get install -y iproute2 && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/api_gateway/target/api_gateway*.jar app.jar
 ENTRYPOINT ["java","-jar","/app/app.jar"]
 
@@ -47,5 +48,9 @@ ENTRYPOINT ["java","-jar","/app/app.jar"]
 
 FROM eclipse-temurin:17-jre-jammy AS weather-station
 WORKDIR /app
+RUN apt-get update && apt-get install -y iproute2 && rm -rf /var/lib/apt/lists/*
+COPY --from=build /app/weather_station/target/weather_station*.jar app.jar
+ENTRYPOINT ["java","-jar","/app/app.jar"]
+RUN apt-get update && apt-get install -y iproute2 && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/weather_station/target/weather_station*.jar app.jar
 ENTRYPOINT ["java","-jar","/app/app.jar"]

@@ -1,4 +1,43 @@
+version: '3.8'
+
 services:
+  # --- DMZ ZONE ---
+  nginx:
+    image: nginx:1.21
+    container_name: nginx_load_balancer
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+    networks:
+      dmz_net:
+        ipv4_address: 172.20.0.10
+    extra_hosts:
+      - "api-gateway:172.20.0.5" # Points to Firewall
+    depends_on:
+      - firewall
+    restart: unless-stopped
+
+  # --- FIREWALL ---
+  firewall:
+    image: alpine:latest
+    container_name: internal_firewall
+    cap_add:
+      - NET_ADMIN
+    volumes:
+      - ./firewall/firewall.sh:/firewall.sh
+    command: /bin/sh -c "apk add --no-cache iptables && chmod +x /firewall.sh && /firewall.sh && tail -f /dev/null"
+    networks:
+      dmz_net:
+        ipv4_address: 172.20.0.5
+      internal_net:
+        ipv4_address: 172.21.0.5
+    ports:
+      - "9876:9876/udp" # Expose UDP for Microcontrollers via Firewall
+    sysctls:
+      - net.ipv4.ip_forward=1
+
+  # --- INTERNAL ZONE ---
   wind-internal-bus:
     image: rabbitmq:3.12-management
     container_name: wind-internal-bus
@@ -7,7 +46,8 @@ services:
       - "5672:5672"
       - "15672:15672"
     networks:
-      - wind_network
+      internal_net:
+        ipv4_address: 172.21.0.12
     volumes:
       - wind_rabbitmq_data:/var/lib/rabbitmq/
     environment:
@@ -21,25 +61,22 @@ services:
 
   service-discovery:
     build:
-      context: ../  # O contexto agora é a raiz do projeto
+      context: ../
       dockerfile: Dockerfile
       target: service-discovery
     container_name: service-discovery
-    # ports:
-    #   - "7000:7000"
     networks:
-      - wind_network
+      internal_net:
+        ipv4_address: 172.21.0.11
     environment:
       - SERVICE_DISCOVERY_URL=http://service-discovery:7000
     restart: on-failure
     healthcheck:
-      # Comando que o Docker executará para verificar a saúde do serviço.
-      # Ele tenta acessar o endpoint /health. Se falhar, o serviço é considerado não saudável.
       test: ["CMD", "curl", "-f", "http://localhost:7000/health"]
       interval: 10s 
       timeout: 5s
       retries: 5
-      start_period: 10s # Dá um tempo inicial de 10s para o serviço iniciar antes de começar os checks.
+      start_period: 10s
 
   api-gateway:
     build:
@@ -47,15 +84,13 @@ services:
       dockerfile: Dockerfile
       target: api-gateway
     container_name: api-gateway
-    # ports:
-    #   - "8000:8000"
     networks:
-      - wind_network
+      internal_net:
+        ipv4_address: 172.21.0.10
     environment:
       - SERVICE_DISCOVERY_URL=http://service-discovery:7000
     restart: on-failure
     depends_on:
-      # Espera o service-discovery ficar "saudável".
       service-discovery:
         condition: service_healthy
 
@@ -66,7 +101,8 @@ services:
       target: application-server
     container_name: application-server
     networks:
-      - wind_network
+      internal_net:
+        ipv4_address: 172.21.0.13
     volumes:
       - ./database_backup:/app/database
     depends_on:
@@ -82,15 +118,16 @@ services:
       dockerfile: Dockerfile
       target: weather-station
     container_name: weather-station
+    cap_add:
+      - NET_ADMIN
+    entrypoint: /bin/sh -c "ip route del default || true; ip route add default via 172.21.0.5; java -jar /app/app.jar"
     networks:
-      - wind_network
-    ports:
-      - "9876:9876/udp"
-      # - "9090:9090"
+      internal_net:
+        ipv4_address: 172.21.0.14
     environment:
       - RABBITMQ_HOST=wind-internal-bus
       - SERVICE_DISCOVERY_URL=http://service-discovery:7000
-      - EGRESS_HOST=host.docker.internal
+      - EGRESS_HOST=172.20.0.1 # Docker Host IP from DMZ perspective (Gateway)
       - EGRESS_PORT=9877
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -101,22 +138,18 @@ services:
         condition: service_healthy
     restart: on-failure
 
-  nginx:
-    image: nginx:1.21
-    container_name: nginx_load_balancer
-    ports:
-      - "80:80" # A única porta que expomos para o exterior
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-    networks:
-      - wind_network
-    depends_on:
-      - api-gateway
-    restart: unless-stopped
-
 networks:
-  wind_network:
+  dmz_net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  internal_net:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
 
 volumes:
   wind_rabbitmq_data:
