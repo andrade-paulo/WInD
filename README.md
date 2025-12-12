@@ -16,8 +16,7 @@ Functional requirements include:
 - **Dashboard**: A dashboard must be provided to visualize the data in real time.
 
 Architectural requirements include:
-- **MQTT Protocol**: The system must use the MQTT protocol for communication between components involved in the data collection and processing.
-- **MQTT Brokers**: Two brokers must be provided: one for the communication between microcontrollers and the middleware, and another for the communication between the middleware and the real time clients.
+- **UDP Protocol**: The system must use the UDP protocol for communication between components involved in the data collection and processing.
 - **RabbitMQ**: The system must use RabbitMQ for communication between the middleware and the historical data consumer. (In this case, the application server that persists the data in a database).
 - **Recovery**: The system must be able to recover from failures, ensuring data integrity and availability.
 - **Microservices**: The system must be designed using a microservices architecture.
@@ -33,17 +32,23 @@ The architecture of WInD is designed to be modular and scalable. In the Image be
 ![WInD - Whiteboard](https://github.com/user-attachments/assets/b053aba5-cf25-4a22-99e4-e993f323ddbd)
 
 ## Highlights
-- **Docker**: The brokers and the RabbitMQ server are containerized using Docker, allowing for easy deployment and management.
+- **Docker**: The RabbitMQ server and other infrastructure components are containerized using Docker, allowing for easy deployment and management.
 - **Load Balancing**: The system uses NGINX as a load balancer to distribute client requests.
 - **RabbitMQ Consumer**: The RabbitMQ consumer is the Application Server. This allow for an easy database replication and a proxy cache implementation in the future, as all of them could also be a RabbitMQ consumer, granting data consistency between them.
 - **Heartbeat Mechanism**: A service discovery component implements a heartbeat mechanism to monitor the health of the microservices.
 
+## Security
+The system implements a security layer to ensure data integrity, confidentiality, and availability.
+- **Hybrid Cryptography**: Communications are secured using a hybrid approach combining RSA for key exchange, AES for data encryption, and HMAC for message integrity.
+- **Authentication**: A custom Password Manager handles user authentication securely.
+- **Reverse Proxy**: NGINX is used as a reverse proxy to manage client requests and hide the internal network topology.
+- **Packet Filter**: `iptables` is configured to act as a firewall, filtering network traffic and protecting the system from unauthorized access.
+
 ## Technologies
 - **Java**: The main programming language used for the system.
 - **Maven**: The build tool used for managing dependencies and building the project.
-- **Mosquitto**: The MQTT broker used for handling MQTT messages.
 - **RabbitMQ**: The message broker used for communication between the middleware and the historical data consumer.
-- **Docker**: Used for containerizing the brokers and RabbitMQ server.
+- **Docker**: Used for containerizing the RabbitMQ server and other infrastructure components.
 - **NGINX**: Used as a load balancer for client requests.
   
 
@@ -55,6 +60,6 @@ To run the system, follow these steps:
 
 ## Running the System
 1. **Start the Docker Containers**: (A Linux environment is Recommended) Navigate to the `wind-infra` directory and run `docker-compose up --build` to start the required services.
-2. **Start the Microcontrollers**: Navigate to the `microcontrollers` directory and run the microcontroller applications. Each microcontroller instance will start sending data to the MQTT broker.
-3. **Start the Real Time Client**: At this point you can start the real time client application. Navigate to the `eng_client` directory and run the application. This will connect to the MQTT broker and start receiving real time data.
+2. **Start the Microcontrollers**: Navigate to the `microcontrollers` directory and run the microcontroller applications. Each microcontroller instance will start sending data via UDP.
+3. **Start the Real Time Client**: At this point you can start the real time client application. Navigate to the `eng_client` directory and run the application. This will start receiving real time data via UDP.
 4. **Start the Historical Client**: Finally, navigate to the `client` directory and run the Historical Client application. This will connect the client to the server and allow you to analyze historical data.
