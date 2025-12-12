@@ -45,6 +45,7 @@ public class Microcontroller {
     private SecretKey aesKey;
     private final HttpClient httpClient;
     private static final String KEY_FILE_PREFIX = "mc_key_";
+    private static final String API_KEY = "super-secret-key-123";
 
     public Microcontroller(int id, String location, String serverHost, int serverPort, int localPort, Character prefix, Character suffix, Character separator) {
         this.id = id;
@@ -189,20 +190,19 @@ public class Microcontroller {
     }
 
     private void performHandshake() throws Exception {
-        // Assuming the gateway is at http://localhost:8000 for simplicity in this simulation
-        // In a real scenario, this URL should be configurable
-        // Updated to point to Weather Station Management Port (9090)
-        String gatewayUrl = "http://localhost:9090";
+        // Connect to Nginx (Port 80) which forwards to API Gateway -> Weather Station
+        String gatewayUrl = "http://" + serverHost + ":80/weather";
 
         // 1. Get Server Public Key
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(gatewayUrl + "/security/public-key"))
+                .header("X-API-Key", API_KEY)
                 .GET()
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         
         if (response.statusCode() != 200) {
-            throw new Exception("Failed to retrieve public key");
+            throw new Exception("Failed to retrieve public key. Status: " + response.statusCode());
         }
         
         PublicKey serverPublicKey = RSA.getPublicKeyFromBase64(response.body());
@@ -224,6 +224,7 @@ public class Microcontroller {
         // Include ID in the query parameter
         request = HttpRequest.newBuilder()
                 .uri(URI.create(gatewayUrl + "/security/handshake?mcId=" + id))
+                .header("X-API-Key", API_KEY)
                 .POST(HttpRequest.BodyPublishers.ofString(encryptedAesKey))
                 .build();
         

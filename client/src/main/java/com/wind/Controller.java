@@ -11,11 +11,9 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.security.PublicKey;
-import java.security.SecureRandom;
 import java.time.Duration;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
-import java.util.Base64;
 
 public class Controller {
     private static HttpClient httpClient;

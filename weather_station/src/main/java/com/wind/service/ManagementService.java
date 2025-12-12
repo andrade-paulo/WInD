@@ -38,9 +38,9 @@ public class ManagementService {
 
     public void start() throws IOException {
         server = HttpServer.create(new InetSocketAddress(port), 0);
-        server.createContext("/microcontrollers", new MicrocontrollerHandler());
-        server.createContext("/security/public-key", new PublicKeyHandler());
-        server.createContext("/security/handshake", new HandshakeHandler());
+        server.createContext("/weather/microcontrollers", new MicrocontrollerHandler());
+        server.createContext("/weather/security/public-key", new PublicKeyHandler());
+        server.createContext("/weather/security/handshake", new HandshakeHandler());
         server.setExecutor(null); // creates a default executor
         server.start();
         System.out.println("[Management Service] Started on port " + port);
@@ -133,10 +133,10 @@ public class ManagementService {
 
             try {
                 if (method.equals("GET")) {
-                    if (pathParts.length == 2) { // /microcontrollers
+                    if (pathParts.length == 3) { // /weather/microcontrollers
                         handleList(exchange);
-                    } else if (pathParts.length == 3) { // /microcontrollers/{id}
-                        handleGet(exchange, Integer.parseInt(pathParts[2]));
+                    } else if (pathParts.length == 4) { // /weather/microcontrollers/{id}
+                        handleGet(exchange, Integer.parseInt(pathParts[3]));
                     } else {
                         sendResponse(exchange, 400, "Invalid path");
                     }
@@ -145,8 +145,8 @@ public class ManagementService {
                 } else if (method.equals("PUT")) {
                     handleUpdate(exchange);
                 } else if (method.equals("DELETE")) {
-                    if (pathParts.length == 3) {
-                        handleDelete(exchange, Integer.parseInt(pathParts[2]));
+                    if (pathParts.length == 4) {
+                        handleDelete(exchange, Integer.parseInt(pathParts[3]));
                     } else {
                         sendResponse(exchange, 400, "Invalid path for DELETE");
                     }
