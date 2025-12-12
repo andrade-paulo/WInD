@@ -127,7 +127,7 @@ services:
     environment:
       - RABBITMQ_HOST=wind-internal-bus
       - SERVICE_DISCOVERY_URL=http://service-discovery:7000
-      - EGRESS_HOST=172.20.0.1 # Docker Host IP from DMZ perspective (Gateway)
+      - EGRESS_HOST=172.21.0.5
       - EGRESS_PORT=9877
     extra_hosts:
       - "host.docker.internal:host-gateway"

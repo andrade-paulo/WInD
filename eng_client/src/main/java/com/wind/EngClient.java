@@ -23,6 +23,7 @@ import javax.crypto.SecretKey;
 public class EngClient {
     private static final String API_KEY = "super-secret-key-123";
     private static final String WEATHER_STATION_SERVICE_NAME = "weather-station";
+    private static final String WEATHER_STATION_UDP_SERVICE_NAME = "weather-station-udp";
 
     private DatagramSocket udpSocket;
     private volatile boolean isRunning = true;
@@ -62,21 +63,26 @@ public class EngClient {
 
             performHandshake();
 
-            System.out.println("[INIT] Requesting WeatherStation address from Server...");
-            String address = getServiceAddress(WEATHER_STATION_SERVICE_NAME);
-            
-            if (address == null) {
-                System.err.println("Could not find WeatherStation service. Exiting.");
+            // Construct Management URL (via Gateway)
+            this.weatherStationManagementUrl = this.gatewayUrl + "/weather";
+            System.out.println("[INIT] WeatherStation Management URL: " + this.weatherStationManagementUrl);
+
+            // Discover UDP Service
+            System.out.println("[INIT] Requesting WeatherStation UDP address from Server...");
+            String udpAddress = getServiceAddress(WEATHER_STATION_UDP_SERVICE_NAME);
+
+            if (udpAddress == null) {
+                System.err.println("Could not find WeatherStation UDP service. Exiting.");
                 return;
             }
 
-            System.out.println("[DISCOVERY] WeatherStation found at: " + address);
-            
+            System.out.println("[DISCOVERY] WeatherStation UDP found at: " + udpAddress);
+
             // Clean up address (remove quotes and brackets if present)
-            address = address.replace("\"", "").replace("[", "").replace("]", "").trim();
+            udpAddress = udpAddress.replace("\"", "").replace("[", "").replace("]", "").trim();
 
             // Parse port from address (assuming host:port)
-            String[] parts = address.split(":");
+            String[] parts = udpAddress.split(":");
             String host = parts[0];
             
             // Fix for local docker environment where host.docker.internal is not resolvable by client
@@ -85,10 +91,6 @@ public class EngClient {
             }
 
             int port = Integer.parseInt(parts[1]);
-
-            // Construct Management URL (via Gateway)
-            this.weatherStationManagementUrl = this.gatewayUrl + "/weather";
-            System.out.println("[INIT] WeatherStation Management URL: " + this.weatherStationManagementUrl);
 
             System.out.println("[INIT] Starting UDP Listener on port " + port + "...");
             startUdpListener(port);

@@ -35,7 +35,9 @@ public class WeatherStation {
     // Service Discovery
     private static final String SERVICE_DISCOVERY_URL = System.getenv().getOrDefault("SERVICE_DISCOVERY_URL", "http://localhost:7000");
     private static final String SERVICE_NAME = "weather-station";
+    private static final String SERVICE_NAME_UDP = "weather-station-udp";
     private static final String INSTANCE_ID = "weather-station-" + UUID.randomUUID();
+    private static final String INSTANCE_ID_UDP = "weather-station-udp-" + UUID.randomUUID();
     // Use internal docker address for management API discovery
     private static final String SERVICE_ADDRESS = System.getenv().getOrDefault("MANAGEMENT_ADDRESS", "weather-station:9090");
 
@@ -43,6 +45,7 @@ public class WeatherStation {
     private static final int MANAGEMENT_PORT = Integer.parseInt(System.getenv().getOrDefault("MANAGEMENT_PORT", "9090"));
 
     private ServiceDiscoveryService serviceDiscoveryService;
+    private ServiceDiscoveryService udpDiscoveryService;
     private RabbitMQService rabbitMQService;
     private UdpService udpService;
     private ManagementService managementService;
@@ -78,6 +81,7 @@ public class WeatherStation {
 
             // Initialize Services
             this.serviceDiscoveryService = new ServiceDiscoveryService(SERVICE_DISCOVERY_URL, SERVICE_NAME, INSTANCE_ID, SERVICE_ADDRESS);
+            this.udpDiscoveryService = new ServiceDiscoveryService(SERVICE_DISCOVERY_URL, SERVICE_NAME_UDP, INSTANCE_ID_UDP, EGRESS_HOST + ":" + EGRESS_PORT);
             this.rabbitMQService = new RabbitMQService(RABBITMQ_HOST, RABBITMQ_USER, RABBITMQ_PASS, RABBITMQ_EXCHANGE_NAME);
             this.udpService = new UdpService(INGRESS_PORT, EGRESS_HOST, EGRESS_PORT);
             this.managementService = new ManagementService(MANAGEMENT_PORT, microcontrollerDAO, publicKey, privateKey, microcontrollerKeys);
@@ -97,6 +101,10 @@ public class WeatherStation {
             System.out.println("[INIT] Registering with Service Discovery...");
             serviceDiscoveryService.registerService();
             serviceDiscoveryService.startHeartbeat();
+            
+            System.out.println("[INIT] Registering UDP Service with Service Discovery...");
+            udpDiscoveryService.registerService();
+            udpDiscoveryService.startHeartbeat();
 
             System.out.println("\nWeatherStation is running and listening for UDP packets. Press Ctrl+C to stop.");
 
@@ -111,6 +119,10 @@ public class WeatherStation {
         if (serviceDiscoveryService != null) {
             serviceDiscoveryService.deregisterService();
             serviceDiscoveryService.stop();
+        }
+        if (udpDiscoveryService != null) {
+            udpDiscoveryService.deregisterService();
+            udpDiscoveryService.stop();
         }
         if (udpService != null) {
             udpService.stop();
