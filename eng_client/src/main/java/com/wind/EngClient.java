@@ -22,7 +22,6 @@ import javax.crypto.SecretKey;
 
 public class EngClient {
     private static final String API_KEY = "super-secret-key-123";
-    private static final String WEATHER_STATION_SERVICE_NAME = "weather-station";
     private static final String WEATHER_STATION_UDP_SERVICE_NAME = "weather-station-udp";
 
     private DatagramSocket udpSocket;
