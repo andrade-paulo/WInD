@@ -23,9 +23,6 @@ iptables -A FORWARD -p icmp -j ACCEPT
 
 # NAT RULES
 
-# Masquerade weather station outbound traffic to Internet
-iptables -t nat -A POSTROUTING -d 172.21.0.0/24 -j MASQUERADE
-
 # HTTP: Nginx (DMZ) -> API Gateway (Internal)
 # Traffic destined to Firewall IP (172.20.0.5) on port 8000
 iptables -t nat -A PREROUTING -d 172.20.0.5 -p tcp --dport 8000 -j DNAT --to-destination 172.21.0.10:8000
@@ -38,8 +35,9 @@ iptables -t nat -A PREROUTING -d 172.20.0.5 -p udp --dport 9876 -j DNAT --to-des
 # Traffic destined to EGRESS_HOST (172.21.0.5) on port 9877
 iptables -t nat -A PREROUTING -d 172.21.0.5 -p udp --dport 9877 -j DNAT --to-destination 172.21.0.1:9877
 
-# 3. Masquerade outbound traffic from Internal Net
+# Masquerade external traffic
 iptables -t nat -A POSTROUTING -s 172.21.0.0/24 -j MASQUERADE
+iptables -t nat -A POSTROUTING -d 172.21.0.0/24 -j MASQUERADE  # Asymmetric routing fix
 
 
 # FORWARDING RULES
